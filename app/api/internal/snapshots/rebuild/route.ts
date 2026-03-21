@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { rebuildTeamStatsSnapshot } from "@/lib/football/buildTeamStatsSnapshot";
+import { rebuildTeamStatsSnapshot } from "../../../../../lib/football/buildTeamStatsSnapshot";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
     const leagueCode = body?.leagueCode;
     const season = body?.season;
 
@@ -17,7 +18,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await rebuildTeamStatsSnapshot(leagueCode, Number(season));
+    const result = await rebuildTeamStatsSnapshot(
+      leagueCode,
+      Number(season)
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -26,7 +30,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error:
+          error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 }
     );
