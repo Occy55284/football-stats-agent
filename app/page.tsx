@@ -23,32 +23,7 @@ export default async function HomePage() {
     `)
     .gte("utc_date", now)
     .order("utc_date", { ascending: true })
-    .limit(10);
-
-  const { data: table } = await supabase
-    .from("standings")
-    .select(`
-      position,
-      points,
-      played_games,
-      goal_difference,
-      team:team_id(name)
-    `)
-    .order("position", { ascending: true });
-
-  const { data: form } = await supabase
-    .from("team_form")
-    .select(`
-      played,
-      won,
-      drawn,
-      lost,
-      goals_for,
-      goals_against,
-      points,
-      team:team_id(name)
-    `)
-    .order("points", { ascending: false });
+    .limit(8);
 
   const { data: predictions } = await supabase
     .from("predictions")
@@ -64,92 +39,107 @@ export default async function HomePage() {
       )
     `)
     .order("created_at", { ascending: false })
+    .limit(8);
+
+  const { data: table } = await supabase
+    .from("standings")
+    .select(`
+      position,
+      points,
+      played_games,
+      goal_difference,
+      team:team_id(name)
+    `)
+    .order("position", { ascending: true })
     .limit(10);
 
   return (
-    <main style={{ padding: "40px", fontFamily: "Arial, sans-serif" }}>
-      <h1>Football Stats Agent ⚽</h1>
+    <main
+      style={{
+        padding: "40px",
+        fontFamily: "Arial, sans-serif",
+        maxWidth: "1000px",
+        margin: "0 auto"
+      }}
+    >
+      <h1 style={{ marginBottom: "10px" }}>Football Stats Agent ⚽</h1>
+      <p style={{ color: "#555", marginBottom: "30px" }}>
+        Premier League data, form and simple match predictions
+      </p>
 
-      <h2 style={{ marginTop: "30px" }}>Next Fixtures</h2>
-      {fixtures?.map((f: any) => (
-        <div key={f.id} style={{ padding: "8px 0" }}>
-          <strong>{f.home?.name}</strong> v <strong>{f.away?.name}</strong>
-          <div>{new Date(f.utc_date).toLocaleString()}</div>
-        </div>
-      ))}
+      <h2>Upcoming Fixtures</h2>
+      <div style={{ marginTop: "15px", marginBottom: "40px" }}>
+        {fixtures?.map((f: any) => (
+          <div
+            key={f.id}
+            style={{
+              padding: "14px 0",
+              borderBottom: "1px solid #e5e5e5"
+            }}
+          >
+            <div>
+              <strong>{f.home?.name}</strong> v <strong>{f.away?.name}</strong>
+            </div>
+            <div style={{ color: "#666", fontSize: "14px" }}>
+              {new Date(f.utc_date).toLocaleString()}
+            </div>
+          </div>
+        ))}
+      </div>
 
-      <h2 style={{ marginTop: "40px" }}>Predictions</h2>
-      {predictions?.map((p: any, i: number) => (
-        <div
-          key={i}
-          style={{
-            padding: "12px 0",
-            borderBottom: "1px solid #ddd"
-          }}
-        >
-          <div>
-            <strong>{p.fixture?.home?.name}</strong> v{" "}
-            <strong>{p.fixture?.away?.name}</strong>
+      <h2>Predictions</h2>
+      <div style={{ marginTop: "15px", marginBottom: "40px" }}>
+        {predictions?.map((p: any, i: number) => (
+          <div
+            key={i}
+            style={{
+              padding: "14px 0",
+              borderBottom: "1px solid #e5e5e5"
+            }}
+          >
+            <div>
+              <strong>{p.fixture?.home?.name}</strong> v{" "}
+              <strong>{p.fixture?.away?.name}</strong>
+            </div>
+            <div style={{ color: "#666", fontSize: "14px" }}>
+              {new Date(p.fixture?.utc_date).toLocaleString()}
+            </div>
+            <div>
+              Prediction: {p.predicted_home_goals} - {p.predicted_away_goals}
+            </div>
+            <div style={{ fontSize: "14px" }}>
+              Result: <strong>{p.predicted_result}</strong> | Confidence:{" "}
+              <strong>{p.confidence}</strong>
+            </div>
           </div>
-          <div>{new Date(p.fixture?.utc_date).toLocaleString()}</div>
-          <div>
-            Prediction: {p.predicted_home_goals} - {p.predicted_away_goals}
-          </div>
-          <div>
-            Result: {p.predicted_result} | Confidence: {p.confidence}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
 
-      <h2 style={{ marginTop: "40px" }}>League Table</h2>
-      <table style={{ width: "100%", marginTop: "10px", borderCollapse: "collapse" }}>
+      <h2>Top 10 League Table</h2>
+      <table
+        style={{
+          width: "100%",
+          marginTop: "15px",
+          borderCollapse: "collapse"
+        }}
+      >
         <thead>
-          <tr>
-            <th>#</th>
-            <th>Team</th>
-            <th>P</th>
-            <th>Pts</th>
-            <th>GD</th>
+          <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
+            <th style={{ padding: "8px 0" }}>#</th>
+            <th style={{ padding: "8px 0" }}>Team</th>
+            <th style={{ padding: "8px 0" }}>P</th>
+            <th style={{ padding: "8px 0" }}>Pts</th>
+            <th style={{ padding: "8px 0" }}>GD</th>
           </tr>
         </thead>
         <tbody>
           {table?.map((row: any) => (
-            <tr key={row.team?.name}>
-              <td>{row.position}</td>
-              <td>{row.team?.name}</td>
-              <td>{row.played_games}</td>
-              <td>{row.points}</td>
-              <td>{row.goal_difference}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h2 style={{ marginTop: "40px" }}>Team Form</h2>
-      <table style={{ width: "100%", marginTop: "10px", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th>Team</th>
-            <th>P</th>
-            <th>W</th>
-            <th>D</th>
-            <th>L</th>
-            <th>GF</th>
-            <th>GA</th>
-            <th>Pts</th>
-          </tr>
-        </thead>
-        <tbody>
-          {form?.map((row: any) => (
-            <tr key={row.team?.name}>
-              <td>{row.team?.name}</td>
-              <td>{row.played}</td>
-              <td>{row.won}</td>
-              <td>{row.drawn}</td>
-              <td>{row.lost}</td>
-              <td>{row.goals_for}</td>
-              <td>{row.goals_against}</td>
-              <td>{row.points}</td>
+            <tr key={row.team?.name} style={{ borderBottom: "1px solid #eee" }}>
+              <td style={{ padding: "8px 0" }}>{row.position}</td>
+              <td style={{ padding: "8px 0" }}>{row.team?.name}</td>
+              <td style={{ padding: "8px 0" }}>{row.played_games}</td>
+              <td style={{ padding: "8px 0" }}>{row.points}</td>
+              <td style={{ padding: "8px 0" }}>{row.goal_difference}</td>
             </tr>
           ))}
         </tbody>
