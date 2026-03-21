@@ -1,25 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
 
 export async function GET() {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-
-  const { data, error } = await supabase.from("leagues").select("*");
-
-  if (error) {
-    return new Response(
-      JSON.stringify({ ok: false, error: error.message }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      }
-    );
-  }
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
   return new Response(
-    JSON.stringify({ ok: true, leagues: data }),
+    JSON.stringify({
+      urlExists: !!url,
+      urlStart: url ? url.slice(0, 30) : null,
+      keyExists: !!serviceKey,
+      keyStart: serviceKey ? serviceKey.slice(0, 12) : null,
+      keyLength: serviceKey.length
+    }),
     {
       headers: { "Content-Type": "application/json" }
     }
