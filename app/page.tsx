@@ -31,12 +31,24 @@ export default async function HomePage() {
       position,
       points,
       played_games,
-      goals_for,
-      goals_against,
       goal_difference,
       team:team_id(name)
     `)
     .order("position", { ascending: true });
+
+  const { data: form } = await supabase
+    .from("team_form")
+    .select(`
+      played,
+      won,
+      drawn,
+      lost,
+      goals_for,
+      goals_against,
+      points,
+      team:team_id(name)
+    `)
+    .order("points", { ascending: false });
 
   return (
     <main style={{ padding: "40px", fontFamily: "Arial, sans-serif" }}>
@@ -51,7 +63,6 @@ export default async function HomePage() {
       ))}
 
       <h2 style={{ marginTop: "40px" }}>League Table</h2>
-
       <table style={{ width: "100%", marginTop: "10px", borderCollapse: "collapse" }}>
         <thead>
           <tr>
@@ -70,6 +81,36 @@ export default async function HomePage() {
               <td>{row.played_games}</td>
               <td>{row.points}</td>
               <td>{row.goal_difference}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2 style={{ marginTop: "40px" }}>Team Form</h2>
+      <table style={{ width: "100%", marginTop: "10px", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th>Team</th>
+            <th>P</th>
+            <th>W</th>
+            <th>D</th>
+            <th>L</th>
+            <th>GF</th>
+            <th>GA</th>
+            <th>Pts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {form?.map((row: any) => (
+            <tr key={row.team?.name}>
+              <td>{row.team?.name}</td>
+              <td>{row.played}</td>
+              <td>{row.won}</td>
+              <td>{row.drawn}</td>
+              <td>{row.lost}</td>
+              <td>{row.goals_for}</td>
+              <td>{row.goals_against}</td>
+              <td>{row.points}</td>
             </tr>
           ))}
         </tbody>
