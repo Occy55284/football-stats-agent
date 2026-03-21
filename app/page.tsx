@@ -8,6 +8,8 @@ export default async function HomePage() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  const now = new Date().toISOString();
+
   const { data: fixtures, error } = await supabase
     .from("fixtures")
     .select(`
@@ -19,13 +21,14 @@ export default async function HomePage() {
       home:home_team_id(name),
       away:away_team_id(name)
     `)
+    .gte("utc_date", now)
     .order("utc_date", { ascending: true })
     .limit(20);
 
   return (
     <main style={{ padding: "40px", fontFamily: "Arial, sans-serif" }}>
       <h1>Football Stats Agent ⚽</h1>
-      <p>Premier League fixtures</p>
+      <p>Next 20 Premier League fixtures</p>
 
       {error && <p>Error: {error.message}</p>}
 
@@ -42,9 +45,7 @@ export default async function HomePage() {
               <strong>{fixture.home?.name}</strong> v{" "}
               <strong>{fixture.away?.name}</strong>
             </div>
-            <div>
-              {new Date(fixture.utc_date).toLocaleString()}
-            </div>
+            <div>{new Date(fixture.utc_date).toLocaleString()}</div>
             <div>
               Status: {fixture.status} | Score: {fixture.home_score ?? "-"} -{" "}
               {fixture.away_score ?? "-"}
