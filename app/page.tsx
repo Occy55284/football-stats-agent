@@ -50,6 +50,22 @@ export default async function HomePage() {
     `)
     .order("points", { ascending: false });
 
+  const { data: predictions } = await supabase
+    .from("predictions")
+    .select(`
+      predicted_home_goals,
+      predicted_away_goals,
+      predicted_result,
+      confidence,
+      fixture:fixture_id(
+        utc_date,
+        home:home_team_id(name),
+        away:away_team_id(name)
+      )
+    `)
+    .order("created_at", { ascending: false })
+    .limit(10);
+
   return (
     <main style={{ padding: "40px", fontFamily: "Arial, sans-serif" }}>
       <h1>Football Stats Agent ⚽</h1>
@@ -59,6 +75,29 @@ export default async function HomePage() {
         <div key={f.id} style={{ padding: "8px 0" }}>
           <strong>{f.home?.name}</strong> v <strong>{f.away?.name}</strong>
           <div>{new Date(f.utc_date).toLocaleString()}</div>
+        </div>
+      ))}
+
+      <h2 style={{ marginTop: "40px" }}>Predictions</h2>
+      {predictions?.map((p: any, i: number) => (
+        <div
+          key={i}
+          style={{
+            padding: "12px 0",
+            borderBottom: "1px solid #ddd"
+          }}
+        >
+          <div>
+            <strong>{p.fixture?.home?.name}</strong> v{" "}
+            <strong>{p.fixture?.away?.name}</strong>
+          </div>
+          <div>{new Date(p.fixture?.utc_date).toLocaleString()}</div>
+          <div>
+            Prediction: {p.predicted_home_goals} - {p.predicted_away_goals}
+          </div>
+          <div>
+            Result: {p.predicted_result} | Confidence: {p.confidence}
+          </div>
         </div>
       ))}
 
