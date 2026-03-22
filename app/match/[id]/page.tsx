@@ -65,27 +65,26 @@ const MAX_H2H = 5;
 
 function formatDateTime(value?: string | null) {
   if (!value) return "TBC";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("en-GB", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  return new Date(value).toLocaleString("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
   });
 }
 
 function formatDate(value?: string | null) {
   if (!value) return "TBC";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-GB", {
+  return new Date(value).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
+}
+
+function resultLabel(value?: string | null) {
+  if (value === "HOME") return "Home win";
+  if (value === "AWAY") return "Away win";
+  if (value === "DRAW") return "Draw";
+  return value || "N/A";
 }
 
 function isFinishedMatch(fixture: FixtureRow) {
@@ -102,14 +101,40 @@ function getOutcomeForTeam(fixture: FixtureRow, teamId: string) {
   return "D";
 }
 
-function getOutcomeClasses(result: "W" | "D" | "L") {
+function outcomeTone(result: "W" | "D" | "L") {
   if (result === "W") {
-    return "border-emerald-500/30 bg-emerald-500/15 text-emerald-300";
+    return { bg: "#dcfce7", text: "#166534", border: "#86efac" };
   }
   if (result === "L") {
-    return "border-red-500/30 bg-red-500/15 text-red-300";
+    return { bg: "#fee2e2", text: "#991b1b", border: "#fca5a5" };
   }
-  return "border-amber-500/30 bg-amber-500/15 text-amber-300";
+  return { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" };
+}
+
+function confidenceTone(value?: string | null) {
+  if (value === "High") {
+    return {
+      bg: "#dcfce7",
+      text: "#166534",
+      border: "#86efac",
+    };
+  }
+  if (value === "Low") {
+    return {
+      bg: "#fee2e2",
+      text: "#991b1b",
+      border: "#fca5a5",
+    };
+  }
+  return {
+    bg: "#fef3c7",
+    text: "#92400e",
+    border: "#fcd34d",
+  };
+}
+
+function firstNumber(value?: number | null) {
+  return Number(value || 0);
 }
 
 function getOpponentName(
@@ -204,21 +229,6 @@ function summariseHeadToHead(
     awayGoals,
     bttsCount,
   };
-}
-
-function clampScore(value?: number | null) {
-  return Math.max(0, Math.min(100, Number(value || 0)));
-}
-
-function compareValue(
-  homeValue?: number | null,
-  awayValue?: number | null
-): "home" | "away" | "draw" {
-  const h = Number(homeValue || 0);
-  const a = Number(awayValue || 0);
-  if (h > a) return "home";
-  if (a > h) return "away";
-  return "draw";
 }
 
 async function getFixtureById(supabase: any, id: string) {
@@ -389,200 +399,145 @@ async function getHeadToHeadFixtures(
   return (data || []) as FixtureRow[];
 }
 
-function resultLabel(value?: string | null) {
-  if (value === "HOME") return "Home win";
-  if (value === "AWAY") return "Away win";
-  if (value === "DRAW") return "Draw";
-  return value || "N/A";
-}
-
-function TeamCrest({
+function TeamBadge({
   team,
-  size = "large",
+  subtitle,
 }: {
   team?: TeamRow;
-  size?: "small" | "large";
+  subtitle: string;
 }) {
-  const classes =
-    size === "small"
-      ? "h-10 w-10"
-      : "h-16 w-16 md:h-20 md:w-20";
-
-  if (team?.crest) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={team.crest}
-        alt={team.name || "Team crest"}
-        className={`${classes} rounded-full border border-zinc-700 bg-white object-contain p-1 shadow-lg`}
-      />
-    );
-  }
-
   return (
-    <div
-      className={`${classes} rounded-full border border-zinc-700 bg-zinc-800 shadow-lg`}
-    />
+    <div style={{ textAlign: "center", flex: 1, minWidth: "180px" }}>
+      {team?.crest ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={team.crest}
+          alt={team.name || "Team crest"}
+          style={{
+            width: 74,
+            height: 74,
+            objectFit: "contain",
+            background: "#ffffff",
+            borderRadius: "999px",
+            padding: 8,
+            border: "1px solid #d1d5db",
+            boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
+            margin: "0 auto 14px",
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            width: 74,
+            height: 74,
+            borderRadius: "999px",
+            background: "#e5e7eb",
+            border: "1px solid #d1d5db",
+            margin: "0 auto 14px",
+          }}
+        />
+      )}
+
+      <div style={{ fontSize: 28, fontWeight: 800, color: "#ffffff", lineHeight: 1.1 }}>
+        {team?.name || "Team"}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 13, color: "#dbeafe" }}>{subtitle}</div>
+    </div>
   );
 }
 
-function StatMiniCard({
+function StatCard({
   label,
   value,
+  sub,
 }: {
   label: string;
   value: string | number;
+  sub?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 text-center">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-2 text-lg font-semibold text-white">{value}</div>
+    <div
+      style={{
+        background: "#ffffff",
+        borderRadius: "20px",
+        padding: "18px",
+        border: "1px solid #e5e7eb",
+        boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+      }}
+    >
+      <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "8px" }}>{label}</div>
+      <div style={{ fontSize: "28px", fontWeight: 800, marginBottom: "4px" }}>{value}</div>
+      {sub ? <div style={{ fontSize: "12px", color: "#9ca3af" }}>{sub}</div> : null}
     </div>
   );
 }
 
-function PercentBar({
-  label,
-  value,
-}: {
-  label: string;
-  value?: number | null;
-}) {
-  const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="text-zinc-300">{label}</span>
-        <span className="font-medium text-white">{safeValue}%</span>
-      </div>
-      <div className="h-2.5 overflow-hidden rounded-full bg-zinc-800">
-        <div
-          className="h-2.5 rounded-full bg-cyan-400"
-          style={{ width: `${safeValue}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function FormDots({
-  fixtures,
-  teamId,
-}: {
-  fixtures: FixtureRow[];
-  teamId: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      {fixtures.map((fixture) => {
-        const result = getOutcomeForTeam(fixture, teamId);
-        return (
-          <span
-            key={fixture.id}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border text-xs font-bold ${getOutcomeClasses(
-              result
-            )}`}
-          >
-            {result}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function TeamFormSummaryCard({
-  team,
-  fixtures,
-  teamId,
-}: {
-  team?: TeamRow;
-  fixtures: FixtureRow[];
-  teamId: string;
-}) {
-  const summary = summariseForm(fixtures, teamId);
-
-  return (
-    <div className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-5">
-      <div className="flex items-center gap-4">
-        <TeamCrest team={team} size="small" />
-        <div className="min-w-0">
-          <div className="truncate text-lg font-semibold text-white">
-            {team?.name || "Team"}
-          </div>
-          <div className="mt-2">
-            <FormDots fixtures={fixtures} teamId={teamId} />
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3">
-        <StatMiniCard
-          label="W-D-L"
-          value={`${summary.wins}-${summary.draws}-${summary.losses}`}
-        />
-        <StatMiniCard
-          label="GF-GA"
-          value={`${summary.goalsFor}-${summary.goalsAgainst}`}
-        />
-      </div>
-    </div>
-  );
-}
-
-function ComparisonMetricRow({
+function MetricRow({
   label,
   homeValue,
   awayValue,
-  isPercent = true,
 }: {
   label: string;
   homeValue?: number | null;
   awayValue?: number | null;
-  isPercent?: boolean;
 }) {
-  const winner = compareValue(homeValue, awayValue);
-  const homeDisplay = Number(homeValue || 0);
-  const awayDisplay = Number(awayValue || 0);
-
-  const homeWidth = isPercent ? clampScore(homeValue) : Math.min(100, homeDisplay * 10);
-  const awayWidth = isPercent ? clampScore(awayValue) : Math.min(100, awayDisplay * 10);
+  const home = firstNumber(homeValue);
+  const away = firstNumber(awayValue);
+  const total = Math.max(home + away, 1);
+  const homeWidth = `${(home / total) * 100}%`;
+  const awayWidth = `${(away / total) * 100}%`;
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-black/30 p-4">
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <div
-          className={`text-sm font-semibold ${
-            winner === "home" ? "text-emerald-300" : "text-zinc-300"
-          }`}
-        >
-          {homeDisplay}
-        </div>
-        <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</div>
-        <div
-          className={`text-sm font-semibold ${
-            winner === "away" ? "text-cyan-300" : "text-zinc-300"
-          }`}
-        >
-          {awayDisplay}
+    <div
+      style={{
+        background: "#f9fafb",
+        borderRadius: "18px",
+        padding: "16px",
+        border: "1px solid #e5e7eb",
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "64px 1fr 64px",
+          gap: "12px",
+          alignItems: "center",
+          marginBottom: "10px",
+        }}
+      >
+        <div style={{ fontSize: "15px", fontWeight: 800, color: "#1d4ed8" }}>{home}</div>
+        <div style={{ textAlign: "center", fontSize: "12px", color: "#6b7280" }}>{label}</div>
+        <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f766e", textAlign: "right" }}>
+          {away}
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <div className="h-2.5 overflow-hidden rounded-full bg-zinc-800">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "10px",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ height: 10, background: "#dbeafe", borderRadius: 999, overflow: "hidden" }}>
           <div
-            className="h-2.5 rounded-full bg-emerald-400"
-            style={{ width: `${homeWidth}%`, marginLeft: `${100 - homeWidth}%` }}
+            style={{
+              height: "100%",
+              width: homeWidth,
+              background: "#2563eb",
+              marginLeft: "auto",
+            }}
           />
         </div>
 
-        <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-600">vs</div>
-
-        <div className="h-2.5 overflow-hidden rounded-full bg-zinc-800">
+        <div style={{ height: 10, background: "#ccfbf1", borderRadius: 999, overflow: "hidden" }}>
           <div
-            className="h-2.5 rounded-full bg-cyan-400"
-            style={{ width: `${awayWidth}%` }}
+            style={{
+              height: "100%",
+              width: awayWidth,
+              background: "#0f766e",
+            }}
           />
         </div>
       </div>
@@ -590,137 +545,7 @@ function ComparisonMetricRow({
   );
 }
 
-function TeamComparisonSection({
-  homeTeam,
-  awayTeam,
-  homeSnapshot,
-  awaySnapshot,
-}: {
-  homeTeam?: TeamRow;
-  awayTeam?: TeamRow;
-  homeSnapshot: TeamSnapshotRow | null;
-  awaySnapshot: TeamSnapshotRow | null;
-}) {
-  const noData = !homeSnapshot && !awaySnapshot;
-
-  return (
-    <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-white">Team comparison</h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            Snapshot metrics from team_stats_snapshot for this league and season
-          </p>
-        </div>
-      </div>
-
-      {noData ? (
-        <div className="mt-5 rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
-          No snapshot comparison data found for this match yet.
-        </div>
-      ) : (
-        <>
-          <div className="mt-5 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <TeamCrest team={homeTeam} size="small" />
-              <div>
-                <div className="text-sm font-semibold text-white">
-                  {homeTeam?.name || "Home"}
-                </div>
-                <div className="text-xs text-zinc-500">Home profile</div>
-              </div>
-            </div>
-
-            <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
-              Side by side
-            </div>
-
-            <div className="flex items-center gap-3 text-right">
-              <div>
-                <div className="text-sm font-semibold text-white">
-                  {awayTeam?.name || "Away"}
-                </div>
-                <div className="text-xs text-zinc-500">Away profile</div>
-              </div>
-              <TeamCrest team={awayTeam} size="small" />
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-3">
-            <ComparisonMetricRow
-              label="Overall strength"
-              homeValue={homeSnapshot?.overall_strength_score}
-              awayValue={awaySnapshot?.overall_strength_score}
-            />
-            <ComparisonMetricRow
-              label="Form score"
-              homeValue={homeSnapshot?.form_score}
-              awayValue={awaySnapshot?.form_score}
-            />
-            <ComparisonMetricRow
-              label="Attack score"
-              homeValue={homeSnapshot?.attack_score}
-              awayValue={awaySnapshot?.attack_score}
-            />
-            <ComparisonMetricRow
-              label="Defence score"
-              homeValue={homeSnapshot?.defence_score}
-              awayValue={awaySnapshot?.defence_score}
-            />
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <StatMiniCard
-              label="Home last 5 pts"
-              value={homeSnapshot?.last_5_points ?? 0}
-            />
-            <StatMiniCard
-              label="Away last 5 pts"
-              value={awaySnapshot?.last_5_points ?? 0}
-            />
-            <StatMiniCard
-              label="Home last 5"
-              value={`${homeSnapshot?.last_5_wins ?? 0}-${homeSnapshot?.last_5_draws ?? 0}-${homeSnapshot?.last_5_losses ?? 0}`}
-            />
-            <StatMiniCard
-              label="Away last 5"
-              value={`${awaySnapshot?.last_5_wins ?? 0}-${awaySnapshot?.last_5_draws ?? 0}-${awaySnapshot?.last_5_losses ?? 0}`}
-            />
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <ComparisonMetricRow
-              label="Clean sheets"
-              homeValue={homeSnapshot?.clean_sheets}
-              awayValue={awaySnapshot?.clean_sheets}
-              isPercent={false}
-            />
-            <ComparisonMetricRow
-              label="Failed to score"
-              homeValue={homeSnapshot?.failed_to_score}
-              awayValue={awaySnapshot?.failed_to_score}
-              isPercent={false}
-            />
-            <ComparisonMetricRow
-              label="BTTS for"
-              homeValue={homeSnapshot?.btts_for}
-              awayValue={awaySnapshot?.btts_for}
-              isPercent={false}
-            />
-            <ComparisonMetricRow
-              label="Over 2.5 for"
-              homeValue={homeSnapshot?.over_25_for}
-              awayValue={awaySnapshot?.over_25_for}
-              isPercent={false}
-            />
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-function FormList({
+function FixtureList({
   title,
   fixtures,
   teamId,
@@ -732,19 +557,32 @@ function FormList({
   teamMap: Record<string, TeamRow>;
 }) {
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
-      <div className="mb-5 flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-white">{title}</h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            Last {fixtures.length} completed matches
-          </p>
-        </div>
+    <div
+      style={{
+        background: "#ffffff",
+        borderRadius: "24px",
+        padding: "22px",
+        border: "1px solid #e5e7eb",
+        boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+      }}
+    >
+      <h2 style={{ marginTop: 0, marginBottom: "6px", fontSize: "24px" }}>{title}</h2>
+      <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "18px" }}>
+        Last {fixtures.length} completed matches
       </div>
 
-      <div className="space-y-3">
+      <div style={{ display: "grid", gap: "14px" }}>
         {fixtures.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
+          <div
+            style={{
+              border: "1px dashed #d1d5db",
+              borderRadius: "18px",
+              padding: "18px",
+              background: "#f9fafb",
+              color: "#6b7280",
+              fontSize: "14px",
+            }}
+          >
             No recent completed matches found.
           </div>
         ) : (
@@ -752,32 +590,56 @@ function FormList({
             const result = getOutcomeForTeam(fixture, teamId);
             const opponent = getOpponentName(fixture, teamId, teamMap);
             const score = getScorelineFromTeamView(fixture, teamId);
+            const tone = outcomeTone(result);
             const isHome = fixture.home_team_id === teamId;
 
             return (
               <div
                 key={fixture.id}
-                className="rounded-2xl border border-zinc-800 bg-black/30 p-4 transition hover:border-zinc-700 hover:bg-black/40"
+                style={{
+                  padding: "16px",
+                  borderRadius: "18px",
+                  background: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                }}
               >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="truncate text-base font-semibold text-white">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "17px", fontWeight: 800, marginBottom: "5px" }}>
                       {isHome ? "vs" : "at"} {opponent}
                     </div>
-                    <div className="mt-1 text-sm text-zinc-400">
+                    <div style={{ fontSize: "13px", color: "#6b7280" }}>
                       {formatDate(fixture.utc_date)} • {isHome ? "Home" : "Away"}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <div className="text-base font-bold text-white">{score}</div>
-                    <span
-                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-xs font-bold ${getOutcomeClasses(
-                        result
-                      )}`}
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <div style={{ fontSize: "18px", fontWeight: 800 }}>{score}</div>
+                    <div
+                      style={{
+                        minWidth: 36,
+                        height: 36,
+                        borderRadius: 999,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: tone.bg,
+                        color: tone.text,
+                        border: `1px solid ${tone.border}`,
+                        fontSize: "12px",
+                        fontWeight: 800,
+                      }}
                     >
                       {result}
-                    </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -785,7 +647,7 @@ function FormList({
           })
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -854,220 +716,399 @@ export default async function MatchDetailsPage({ params }: PageProps) {
   const homeTeam = teamMap[homeTeamId];
   const awayTeam = teamMap[awayTeamId];
   const h2hSummary = summariseHeadToHead(h2h, homeTeamId, awayTeamId);
+  const homeForm = summariseForm(homeRecent, homeTeamId);
+  const awayForm = summariseForm(awayRecent, awayTeamId);
+  const confidence = prediction?.confidence_label || prediction?.confidence || "Medium";
+  const tone = confidenceTone(confidence);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.12),transparent_20%),radial-gradient(circle_at_top_right,rgba(6,182,212,0.12),transparent_25%),#050505] text-white">
-      <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 lg:px-8">
-        <div className="mb-6">
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#f5f7fb",
+        padding: "32px 20px 56px",
+        fontFamily: "Arial, sans-serif",
+        color: "#111827",
+      }}
+    >
+      <div style={{ maxWidth: "1260px", margin: "0 auto" }}>
+        <div style={{ marginBottom: "18px" }}>
           <Link
             href="/"
-            className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-900/80 px-4 py-2 text-sm text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              textDecoration: "none",
+              color: "#1f2937",
+              background: "#ffffff",
+              border: "1px solid #e5e7eb",
+              borderRadius: "999px",
+              padding: "10px 16px",
+              fontSize: "14px",
+              fontWeight: 700,
+              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            }}
           >
             ← Back to predictions
           </Link>
         </div>
 
-        <section className="overflow-hidden rounded-[32px] border border-zinc-800 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black shadow-2xl">
-          <div className="border-b border-zinc-800 px-6 py-4 md:px-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xs uppercase tracking-[0.22em] text-zinc-400">
-                {fixture.league_code || "League"}
-                {fixture.season ? ` • ${fixture.season}` : ""}
-              </div>
-              <div className="text-sm text-zinc-400">{formatDateTime(fixture.utc_date)}</div>
-            </div>
-          </div>
+        <section
+          style={{
+            background: "linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #2563eb 100%)",
+            color: "#ffffff",
+            borderRadius: "28px",
+            padding: "30px",
+            boxShadow: "0 18px 40px rgba(15,23,42,0.18)",
+            marginBottom: "24px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "24px",
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <TeamBadge team={homeTeam} subtitle="Home side" />
 
-          <div className="grid gap-8 px-6 py-8 md:px-8 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-            <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
-              <TeamCrest team={homeTeam} />
-              <div className="mt-4 text-2xl font-bold text-white md:text-3xl">
-                {homeTeam?.name || "Home"}
+            <div style={{ textAlign: "center", minWidth: "280px", flex: "0 1 320px" }}>
+              <div
+                style={{
+                  display: "inline-block",
+                  padding: "6px 10px",
+                  borderRadius: "999px",
+                  background: "rgba(255,255,255,0.14)",
+                  fontSize: "12px",
+                  letterSpacing: "0.3px",
+                  marginBottom: "12px",
+                }}
+              >
+                {fixture.league_code || "League"}{fixture.season ? ` • ${fixture.season}` : ""}
               </div>
-              <div className="mt-2 text-sm text-zinc-400">Home side</div>
-            </div>
 
-            <div className="min-w-[260px] text-center">
-              <div className="text-sm uppercase tracking-[0.18em] text-zinc-500">Match Centre</div>
+              <div style={{ fontSize: "15px", color: "#dbeafe", marginBottom: "10px" }}>
+                {formatDateTime(fixture.utc_date)}
+              </div>
+
+              <div style={{ fontSize: "18px", color: "#bfdbfe", marginBottom: "12px" }}>
+                Match Centre
+              </div>
 
               {isFinishedMatch(fixture) ? (
-                <div className="mt-5">
-                  <div className="flex items-center justify-center gap-4">
-                    <span className="text-5xl font-extrabold tracking-tight text-white md:text-6xl">
-                      {fixture.home_score ?? "-"}
-                    </span>
-                    <span className="text-2xl font-semibold text-zinc-500">-</span>
-                    <span className="text-5xl font-extrabold tracking-tight text-white md:text-6xl">
-                      {fixture.away_score ?? "-"}
-                    </span>
-                  </div>
-                  <div className="mt-3 inline-flex rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-300">
-                    Final result
-                  </div>
+                <div style={{ fontSize: "56px", fontWeight: 900, lineHeight: 1, marginBottom: "10px" }}>
+                  {fixture.home_score ?? "-"} - {fixture.away_score ?? "-"}
                 </div>
               ) : (
-                <div className="mt-5">
-                  <div className="text-4xl font-extrabold tracking-tight text-white md:text-5xl">
-                    vs
-                  </div>
-                  <div className="mt-3 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-1.5 text-sm font-medium text-cyan-300">
-                    Upcoming fixture
-                  </div>
+                <div style={{ fontSize: "44px", fontWeight: 900, lineHeight: 1, marginBottom: "10px" }}>
+                  vs
                 </div>
               )}
 
+              <div
+                style={{
+                  display: "inline-block",
+                  background: tone.bg,
+                  color: tone.text,
+                  border: `1px solid ${tone.border}`,
+                  borderRadius: "999px",
+                  padding: "8px 12px",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  marginBottom: "14px",
+                }}
+              >
+                {prediction ? `${confidence} confidence` : isFinishedMatch(fixture) ? "Final result" : "Upcoming fixture"}
+              </div>
+
               {prediction ? (
-                <div className="mx-auto mt-6 max-w-md rounded-3xl border border-zinc-800 bg-zinc-900/70 p-4">
-                  <div className="text-xs uppercase tracking-wide text-zinc-500">
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.1)",
+                    border: "1px solid rgba(255,255,255,0.16)",
+                    borderRadius: "20px",
+                    padding: "16px",
+                    marginTop: "8px",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", color: "#bfdbfe", marginBottom: "6px" }}>
                     Model prediction
                   </div>
-                  <div className="mt-2 text-xl font-semibold text-white">
+                  <div style={{ fontSize: "26px", fontWeight: 800, marginBottom: "6px" }}>
                     {resultLabel(prediction.predicted_result)}
                   </div>
-                  <div className="mt-2 text-sm text-zinc-400">
-                    Predicted score: {prediction.predicted_home_goals ?? "-"} -{" "}
-                    {prediction.predicted_away_goals ?? "-"}
+                  <div style={{ fontSize: "13px", color: "#dbeafe" }}>
+                    Predicted score: {prediction.predicted_home_goals ?? "-"} - {prediction.predicted_away_goals ?? "-"}
                   </div>
                 </div>
               ) : null}
             </div>
 
-            <div className="flex flex-col items-center text-center lg:items-end lg:text-right">
-              <TeamCrest team={awayTeam} />
-              <div className="mt-4 text-2xl font-bold text-white md:text-3xl">
-                {awayTeam?.name || "Away"}
-              </div>
-              <div className="mt-2 text-sm text-zinc-400">Away side</div>
-            </div>
+            <TeamBadge team={awayTeam} subtitle="Away side" />
           </div>
         </section>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <TeamFormSummaryCard team={homeTeam} fixtures={homeRecent} teamId={homeTeamId} />
-          <TeamFormSummaryCard team={awayTeam} fixtures={awayRecent} teamId={awayTeamId} />
-        </div>
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "16px",
+            marginBottom: "28px",
+          }}
+        >
+          <StatCard label={`${homeTeam?.name || "Home"} form`} value={`${homeForm.wins}-${homeForm.draws}-${homeForm.losses}`} sub="Last 5 completed matches" />
+          <StatCard label={`${awayTeam?.name || "Away"} form`} value={`${awayForm.wins}-${awayForm.draws}-${awayForm.losses}`} sub="Last 5 completed matches" />
+          <StatCard label="Head-to-head record" value={`${h2hSummary.homeWins}-${h2hSummary.draws}-${h2hSummary.awayWins}`} sub="Home wins • draws • away wins" />
+          <StatCard label="BTTS in H2H" value={`${h2hSummary.bttsCount}/${h2h.length}`} sub="Both teams scored" />
+          <StatCard label="Prediction loaded" value={prediction ? "Yes" : "No"} sub="Current match prediction" />
+        </section>
 
-        <div className="mt-6">
-          <TeamComparisonSection
-            homeTeam={homeTeam}
-            awayTeam={awayTeam}
-            homeSnapshot={homeSnapshot}
-            awaySnapshot={awaySnapshot}
-          />
-        </div>
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.35fr 0.9fr",
+            gap: "24px",
+            alignItems: "start",
+            marginBottom: "28px",
+          }}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "24px",
+              padding: "22px",
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>Team Comparison</h2>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold text-white">Prediction insight</h2>
-                <p className="mt-1 text-sm text-zinc-400">
-                  Stored probabilities and model commentary for this fixture
-                </p>
-              </div>
+            <div style={{ display: "grid", gap: "14px" }}>
+              <MetricRow
+                label="Overall strength"
+                homeValue={homeSnapshot?.overall_strength_score}
+                awayValue={awaySnapshot?.overall_strength_score}
+              />
+              <MetricRow
+                label="Form score"
+                homeValue={homeSnapshot?.form_score}
+                awayValue={awaySnapshot?.form_score}
+              />
+              <MetricRow
+                label="Attack score"
+                homeValue={homeSnapshot?.attack_score}
+                awayValue={awaySnapshot?.attack_score}
+              />
+              <MetricRow
+                label="Defence score"
+                homeValue={homeSnapshot?.defence_score}
+                awayValue={awaySnapshot?.defence_score}
+              />
             </div>
 
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: "14px",
+                marginTop: "18px",
+              }}
+            >
+              <StatCard label={`${homeTeam?.name || "Home"} last 5 pts`} value={homeSnapshot?.last_5_points ?? 0} />
+              <StatCard label={`${awayTeam?.name || "Away"} last 5 pts`} value={awaySnapshot?.last_5_points ?? 0} />
+              <StatCard label={`${homeTeam?.name || "Home"} clean sheets`} value={homeSnapshot?.clean_sheets ?? 0} />
+              <StatCard label={`${awayTeam?.name || "Away"} clean sheets`} value={awaySnapshot?.clean_sheets ?? 0} />
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "24px",
+              padding: "22px",
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>Prediction Insight</h2>
+
             {!prediction ? (
-              <div className="mt-5 rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
+              <div
+                style={{
+                  border: "1px dashed #d1d5db",
+                  borderRadius: "18px",
+                  padding: "18px",
+                  background: "#f9fafb",
+                  color: "#6b7280",
+                  fontSize: "14px",
+                }}
+              >
                 No prediction found for this match yet.
               </div>
             ) : (
               <>
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  <StatMiniCard
-                    label="Outcome"
-                    value={resultLabel(prediction.predicted_result)}
-                  />
-                  <StatMiniCard
-                    label="Confidence"
-                    value={prediction.confidence_label || prediction.confidence || "Medium"}
-                  />
-                  <StatMiniCard
-                    label="Predicted score"
-                    value={`${prediction.predicted_home_goals ?? "-"} - ${
-                      prediction.predicted_away_goals ?? "-"
-                    }`}
-                  />
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                    gap: "14px",
+                    marginBottom: "18px",
+                  }}
+                >
+                  <StatCard label="Outcome" value={resultLabel(prediction.predicted_result)} />
+                  <StatCard label="Confidence" value={confidence} />
+                  <StatCard label="Predicted score" value={`${prediction.predicted_home_goals ?? "-"} - ${prediction.predicted_away_goals ?? "-"}`} />
                 </div>
 
-                <div className="mt-5 rounded-3xl border border-zinc-800 bg-black/30 p-5">
-                  <div className="space-y-4">
-                    <PercentBar
-                      label={`${homeTeam?.name || "Home"} win`}
-                      value={prediction.home_win_pct}
-                    />
-                    <PercentBar label="Draw" value={prediction.draw_pct} />
-                    <PercentBar
-                      label={`${awayTeam?.name || "Away"} win`}
-                      value={prediction.away_win_pct}
-                    />
-                  </div>
+                <div
+                  style={{
+                    background: "#f9fafb",
+                    borderRadius: "18px",
+                    padding: "16px",
+                    border: "1px solid #e5e7eb",
+                    marginBottom: "18px",
+                  }}
+                >
+                  {[
+                    { label: `${homeTeam?.name || "Home"} win`, value: prediction.home_win_pct, color: "#2563eb", bg: "#dbeafe" },
+                    { label: "Draw", value: prediction.draw_pct, color: "#d97706", bg: "#fef3c7" },
+                    { label: `${awayTeam?.name || "Away"} win`, value: prediction.away_win_pct, color: "#0f766e", bg: "#ccfbf1" },
+                  ].map((item) => (
+                    <div key={item.label} style={{ marginBottom: "14px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "12px",
+                          fontSize: "13px",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <span style={{ color: "#374151" }}>{item.label}</span>
+                        <strong>{Number(item.value || 0).toFixed(1)}%</strong>
+                      </div>
+                      <div style={{ height: 10, background: item.bg, borderRadius: 999, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${Math.max(0, Math.min(100, Number(item.value || 0)))}%`,
+                            background: item.color,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
                 {prediction.explanation ? (
-                  <div className="mt-5 rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-5 text-sm text-cyan-100">
-                    <span className="font-semibold">Model note:</span> {prediction.explanation}
+                  <div
+                    style={{
+                      background: "#eff6ff",
+                      border: "1px solid #bfdbfe",
+                      borderRadius: "18px",
+                      padding: "16px",
+                      color: "#1e3a8a",
+                      fontSize: "14px",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    <strong>Model note:</strong> {prediction.explanation}
                   </div>
                 ) : null}
               </>
             )}
-          </section>
+          </div>
+        </section>
 
-          <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
-            <div>
-              <h2 className="text-xl font-semibold text-white">Head-to-head</h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Last {MAX_H2H} completed meetings before this fixture
-              </p>
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "24px",
+            alignItems: "start",
+            marginBottom: "28px",
+          }}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "24px",
+              padding: "22px",
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>Head-to-Head</h2>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                gap: "14px",
+                marginBottom: "18px",
+              }}
+            >
+              <StatCard label={`${homeTeam?.name || "Home"} wins`} value={h2hSummary.homeWins} />
+              <StatCard label="Draws" value={h2hSummary.draws} />
+              <StatCard label={`${awayTeam?.name || "Away"} wins`} value={h2hSummary.awayWins} />
+              <StatCard label={`${homeTeam?.name || "Home"} goals`} value={h2hSummary.homeGoals} />
+              <StatCard label={`${awayTeam?.name || "Away"} goals`} value={h2hSummary.awayGoals} />
+              <StatCard label="BTTS" value={`${h2hSummary.bttsCount}/${h2h.length}`} />
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3">
-              <StatMiniCard
-                label={`${homeTeam?.name || "Home"} wins`}
-                value={h2hSummary.homeWins}
-              />
-              <StatMiniCard label="Draws" value={h2hSummary.draws} />
-              <StatMiniCard
-                label={`${awayTeam?.name || "Away"} wins`}
-                value={h2hSummary.awayWins}
-              />
-              <StatMiniCard
-                label={`${homeTeam?.name || "Home"} goals`}
-                value={h2hSummary.homeGoals}
-              />
-              <StatMiniCard
-                label={`${awayTeam?.name || "Away"} goals`}
-                value={h2hSummary.awayGoals}
-              />
-              <StatMiniCard
-                label="BTTS"
-                value={`${h2hSummary.bttsCount}/${h2h.length}`}
-              />
-            </div>
-
-            <div className="mt-5 space-y-3">
+            <div style={{ display: "grid", gap: "14px" }}>
               {h2h.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
+                <div
+                  style={{
+                    border: "1px dashed #d1d5db",
+                    borderRadius: "18px",
+                    padding: "18px",
+                    background: "#f9fafb",
+                    color: "#6b7280",
+                    fontSize: "14px",
+                  }}
+                >
                   No completed head-to-head matches found.
                 </div>
               ) : (
                 h2h.map((game) => (
                   <div
                     key={game.id}
-                    className="rounded-2xl border border-zinc-800 bg-black/30 p-4 transition hover:border-zinc-700"
+                    style={{
+                      padding: "16px",
+                      borderRadius: "18px",
+                      background: "#f9fafb",
+                      border: "1px solid #e5e7eb",
+                    }}
                   >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="truncate text-base font-semibold text-white">
-                          {teamMap[game.home_team_id || ""]?.name || "Home"} vs{" "}
-                          {teamMap[game.away_team_id || ""]?.name || "Away"}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: "17px", fontWeight: 800, marginBottom: "5px" }}>
+                          {teamMap[game.home_team_id || ""]?.name || "Home"} v {teamMap[game.away_team_id || ""]?.name || "Away"}
                         </div>
-                        <div className="mt-1 text-sm text-zinc-400">
-                          {formatDate(game.utc_date)}
-                        </div>
+                        <div style={{ fontSize: "13px", color: "#6b7280" }}>{formatDate(game.utc_date)}</div>
                       </div>
 
-                      <div className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-base font-bold text-white">
+                      <div
+                        style={{
+                          fontSize: "18px",
+                          fontWeight: 800,
+                          background: "#ffffff",
+                          border: "1px solid #e5e7eb",
+                          borderRadius: "14px",
+                          padding: "10px 14px",
+                        }}
+                      >
                         {game.home_score ?? "-"} - {game.away_score ?? "-"}
                       </div>
                     </div>
@@ -1075,24 +1116,24 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                 ))
               )}
             </div>
-          </section>
-        </div>
+          </div>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-2">
-          <FormList
-            title={`${homeTeam?.name || "Home team"} last 5`}
-            fixtures={homeRecent}
-            teamId={homeTeamId}
-            teamMap={teamMap}
-          />
+          <div style={{ display: "grid", gap: "24px" }}>
+            <FixtureList
+              title={`${homeTeam?.name || "Home team"} Last 5`}
+              fixtures={homeRecent}
+              teamId={homeTeamId}
+              teamMap={teamMap}
+            />
 
-          <FormList
-            title={`${awayTeam?.name || "Away team"} last 5`}
-            fixtures={awayRecent}
-            teamId={awayTeamId}
-            teamMap={teamMap}
-          />
-        </div>
+            <FixtureList
+              title={`${awayTeam?.name || "Away team"} Last 5`}
+              fixtures={awayRecent}
+              teamId={awayTeamId}
+              teamMap={teamMap}
+            />
+          </div>
+        </section>
       </div>
     </main>
   );
