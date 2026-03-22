@@ -231,6 +231,166 @@ function summariseHeadToHead(
   };
 }
 
+function buildReasoningPoints({
+  prediction,
+  homeTeam,
+  awayTeam,
+  homeSnapshot,
+  awaySnapshot,
+  homeRecent,
+  awayRecent,
+  homeHomeRecent,
+  awayAwayRecent,
+  h2hSummary,
+  h2hCount,
+}: {
+  prediction: PredictionRow | null;
+  homeTeam?: TeamRow;
+  awayTeam?: TeamRow;
+  homeSnapshot: TeamSnapshotRow | null;
+  awaySnapshot: TeamSnapshotRow | null;
+  homeRecent: FixtureRow[];
+  awayRecent: FixtureRow[];
+  homeHomeRecent: FixtureRow[];
+  awayAwayRecent: FixtureRow[];
+  h2hSummary: {
+    homeWins: number;
+    draws: number;
+    awayWins: number;
+    homeGoals: number;
+    awayGoals: number;
+    bttsCount: number;
+  };
+  h2hCount: number;
+}) {
+  const points: string[] = [];
+  const homeName = homeTeam?.name || "Home";
+  const awayName = awayTeam?.name || "Away";
+
+  const homeStrength = firstNumber(homeSnapshot?.overall_strength_score);
+  const awayStrength = firstNumber(awaySnapshot?.overall_strength_score);
+  const homeFormScore = firstNumber(homeSnapshot?.form_score);
+  const awayFormScore = firstNumber(awaySnapshot?.form_score);
+  const homeAttack = firstNumber(homeSnapshot?.attack_score);
+  const awayAttack = firstNumber(awaySnapshot?.attack_score);
+  const homeDefence = firstNumber(homeSnapshot?.defence_score);
+  const awayDefence = firstNumber(awaySnapshot?.defence_score);
+
+  const homeOverall = summariseForm(homeRecent, homeTeam?.id || "");
+  const awayOverall = summariseForm(awayRecent, awayTeam?.id || "");
+  const homeVenue = summariseForm(homeHomeRecent, homeTeam?.id || "");
+  const awayVenue = summariseForm(awayAwayRecent, awayTeam?.id || "");
+
+  if (prediction?.predicted_result === "HOME") {
+    if (homeStrength - awayStrength >= 8) {
+      points.push(
+        `${homeName} have the stronger overall profile (${homeStrength.toFixed(1)} vs ${awayStrength.toFixed(1)}).`
+      );
+    }
+    if (homeFormScore - awayFormScore >= 6) {
+      points.push(
+        `${homeName} come in with better recent form (${homeFormScore.toFixed(1)} vs ${awayFormScore.toFixed(1)}).`
+      );
+    }
+    if (homeAttack - awayAttack >= 6) {
+      points.push(
+        `${homeName} carry the stronger attacking numbers (${homeAttack.toFixed(1)} vs ${awayAttack.toFixed(1)}).`
+      );
+    }
+    if (homeDefence - awayDefence >= 6) {
+      points.push(
+        `${homeName} also rate better defensively (${homeDefence.toFixed(1)} vs ${awayDefence.toFixed(1)}).`
+      );
+    }
+    if (homeVenue.wins > awayVenue.wins) {
+      points.push(
+        `${homeName} have been stronger at home lately (${homeVenue.wins}-${homeVenue.draws}-${homeVenue.losses}) than ${awayName} have been away (${awayVenue.wins}-${awayVenue.draws}-${awayVenue.losses}).`
+      );
+    }
+    if (h2hCount > 0 && h2hSummary.homeWins > h2hSummary.awayWins) {
+      points.push(
+        `${homeName} hold the recent head-to-head edge (${h2hSummary.homeWins} wins vs ${h2hSummary.awayWins}).`
+      );
+    }
+  }
+
+  if (prediction?.predicted_result === "AWAY") {
+    if (awayStrength - homeStrength >= 8) {
+      points.push(
+        `${awayName} have the stronger overall profile (${awayStrength.toFixed(1)} vs ${homeStrength.toFixed(1)}).`
+      );
+    }
+    if (awayFormScore - homeFormScore >= 6) {
+      points.push(
+        `${awayName} come in with better recent form (${awayFormScore.toFixed(1)} vs ${homeFormScore.toFixed(1)}).`
+      );
+    }
+    if (awayAttack - homeAttack >= 6) {
+      points.push(
+        `${awayName} carry the stronger attacking numbers (${awayAttack.toFixed(1)} vs ${homeAttack.toFixed(1)}).`
+      );
+    }
+    if (awayDefence - homeDefence >= 6) {
+      points.push(
+        `${awayName} also rate better defensively (${awayDefence.toFixed(1)} vs ${homeDefence.toFixed(1)}).`
+      );
+    }
+    if (awayVenue.wins > homeVenue.wins) {
+      points.push(
+        `${awayName} have been stronger away lately (${awayVenue.wins}-${awayVenue.draws}-${awayVenue.losses}) than ${homeName} have been at home (${homeVenue.wins}-${homeVenue.draws}-${homeVenue.losses}).`
+      );
+    }
+    if (h2hCount > 0 && h2hSummary.awayWins > h2hSummary.homeWins) {
+      points.push(
+        `${awayName} hold the recent head-to-head edge (${h2hSummary.awayWins} wins vs ${h2hSummary.homeWins}).`
+      );
+    }
+  }
+
+  if (prediction?.predicted_result === "DRAW") {
+    if (Math.abs(homeStrength - awayStrength) <= 6) {
+      points.push(
+        `The overall strength profiles are close (${homeStrength.toFixed(1)} vs ${awayStrength.toFixed(1)}).`
+      );
+    }
+    if (Math.abs(homeFormScore - awayFormScore) <= 5) {
+      points.push(
+        `Recent form is fairly balanced (${homeFormScore.toFixed(1)} vs ${awayFormScore.toFixed(1)}).`
+      );
+    }
+    if (Math.abs(homeOverall.goalsFor - awayOverall.goalsFor) <= 2) {
+      points.push(
+        `Both teams are producing similar recent scoring output (${homeOverall.goalsFor} vs ${awayOverall.goalsFor} goals across the last five).`
+      );
+    }
+    if (h2hCount > 0 && h2hSummary.draws >= Math.max(h2hSummary.homeWins, h2hSummary.awayWins)) {
+      points.push(`Recent head-to-head meetings have been tight, with ${h2hSummary.draws} draws in the sample.`);
+    }
+  }
+
+  if (h2hCount > 0 && h2hSummary.bttsCount >= 3) {
+    points.push(`There is a strong both-teams-to-score trend in the recent head-to-heads (${h2hSummary.bttsCount}/${h2hCount}).`);
+  }
+
+  const homeBtts = firstNumber(homeSnapshot?.btts_for);
+  const awayBtts = firstNumber(awaySnapshot?.btts_for);
+  if (homeBtts >= 3 && awayBtts >= 3) {
+    points.push(`Both sides have shown frequent BTTS tendencies recently (${homeBtts} and ${awayBtts}).`);
+  }
+
+  const homeOver = firstNumber(homeSnapshot?.over_25_for);
+  const awayOver = firstNumber(awaySnapshot?.over_25_for);
+  if (homeOver >= 3 && awayOver >= 3) {
+    points.push(`Recent games suggest a decent chance of goals, with both teams often landing over 2.5.`);
+  }
+
+  if (points.length === 0) {
+    points.push("The model is leaning on a mix of recent form, team strength scores, and venue-specific trends.");
+  }
+
+  return points.slice(0, 5);
+}
+
 async function getFixtureById(supabase: any, id: string) {
   const { data, error } = await supabase
     .from("fixtures")
@@ -892,6 +1052,20 @@ export default async function MatchDetailsPage({ params }: PageProps) {
   const confidence = prediction?.confidence_label || prediction?.confidence || "Medium";
   const tone = confidenceTone(confidence);
 
+  const reasoningPoints = buildReasoningPoints({
+    prediction,
+    homeTeam,
+    awayTeam,
+    homeSnapshot,
+    awaySnapshot,
+    homeRecent,
+    awayRecent,
+    homeHomeRecent,
+    awayAwayRecent,
+    h2hSummary,
+    h2hCount: h2h.length,
+  });
+
   return (
     <main
       style={{
@@ -1203,129 +1377,184 @@ export default async function MatchDetailsPage({ params }: PageProps) {
             </div>
           </div>
 
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "24px",
-              padding: "22px",
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
-            }}
-          >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
-              Prediction Insight
-            </h2>
+          <div style={{ display: "grid", gap: "24px" }}>
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "24px",
+                padding: "22px",
+                border: "1px solid #e5e7eb",
+                boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+              }}
+            >
+              <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
+                Prediction Insight
+              </h2>
 
-            {!prediction ? (
-              <div
-                style={{
-                  border: "1px dashed #d1d5db",
-                  borderRadius: "18px",
-                  padding: "18px",
-                  background: "#f9fafb",
-                  color: "#6b7280",
-                  fontSize: "14px",
-                }}
-              >
-                No prediction found for this match yet.
-              </div>
-            ) : (
-              <>
+              {!prediction ? (
                 <div
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                    gap: "14px",
-                    marginBottom: "18px",
-                  }}
-                >
-                  <StatCard label="Outcome" value={resultLabel(prediction.predicted_result)} />
-                  <StatCard label="Confidence" value={confidence} />
-                  <StatCard
-                    label="Predicted score"
-                    value={`${prediction.predicted_home_goals ?? "-"} - ${prediction.predicted_away_goals ?? "-"}`}
-                  />
-                </div>
-
-                <div
-                  style={{
-                    background: "#f9fafb",
+                    border: "1px dashed #d1d5db",
                     borderRadius: "18px",
-                    padding: "16px",
-                    border: "1px solid #e5e7eb",
-                    marginBottom: "18px",
+                    padding: "18px",
+                    background: "#f9fafb",
+                    color: "#6b7280",
+                    fontSize: "14px",
                   }}
                 >
-                  {[
-                    {
-                      label: `${homeTeam?.name || "Home"} win`,
-                      value: prediction.home_win_pct,
-                      color: "#2563eb",
-                      bg: "#dbeafe",
-                    },
-                    {
-                      label: "Draw",
-                      value: prediction.draw_pct,
-                      color: "#d97706",
-                      bg: "#fef3c7",
-                    },
-                    {
-                      label: `${awayTeam?.name || "Away"} win`,
-                      value: prediction.away_win_pct,
-                      color: "#0f766e",
-                      bg: "#ccfbf1",
-                    },
-                  ].map((item) => (
-                    <div key={item.label} style={{ marginBottom: "14px" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: "12px",
-                          fontSize: "13px",
-                          marginBottom: "6px",
-                        }}
-                      >
-                        <span style={{ color: "#374151" }}>{item.label}</span>
-                        <strong>{Number(item.value || 0).toFixed(1)}%</strong>
-                      </div>
-                      <div
-                        style={{
-                          height: 10,
-                          background: item.bg,
-                          borderRadius: 999,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${Math.max(0, Math.min(100, Number(item.value || 0)))}%`,
-                            background: item.color,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                  No prediction found for this match yet.
                 </div>
-
-                {prediction.explanation ? (
+              ) : (
+                <>
                   <div
                     style={{
-                      background: "#eff6ff",
-                      border: "1px solid #bfdbfe",
-                      borderRadius: "18px",
-                      padding: "16px",
-                      color: "#1e3a8a",
-                      fontSize: "14px",
-                      lineHeight: 1.6,
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                      gap: "14px",
+                      marginBottom: "18px",
                     }}
                   >
-                    <strong>Model note:</strong> {prediction.explanation}
+                    <StatCard label="Outcome" value={resultLabel(prediction.predicted_result)} />
+                    <StatCard label="Confidence" value={confidence} />
+                    <StatCard
+                      label="Predicted score"
+                      value={`${prediction.predicted_home_goals ?? "-"} - ${prediction.predicted_away_goals ?? "-"}`}
+                    />
                   </div>
-                ) : null}
-              </>
-            )}
+
+                  <div
+                    style={{
+                      background: "#f9fafb",
+                      borderRadius: "18px",
+                      padding: "16px",
+                      border: "1px solid #e5e7eb",
+                      marginBottom: "18px",
+                    }}
+                  >
+                    {[
+                      {
+                        label: `${homeTeam?.name || "Home"} win`,
+                        value: prediction.home_win_pct,
+                        color: "#2563eb",
+                        bg: "#dbeafe",
+                      },
+                      {
+                        label: "Draw",
+                        value: prediction.draw_pct,
+                        color: "#d97706",
+                        bg: "#fef3c7",
+                      },
+                      {
+                        label: `${awayTeam?.name || "Away"} win`,
+                        value: prediction.away_win_pct,
+                        color: "#0f766e",
+                        bg: "#ccfbf1",
+                      },
+                    ].map((item) => (
+                      <div key={item.label} style={{ marginBottom: "14px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            fontSize: "13px",
+                            marginBottom: "6px",
+                          }}
+                        >
+                          <span style={{ color: "#374151" }}>{item.label}</span>
+                          <strong>{Number(item.value || 0).toFixed(1)}%</strong>
+                        </div>
+                        <div
+                          style={{
+                            height: 10,
+                            background: item.bg,
+                            borderRadius: 999,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: "100%",
+                              width: `${Math.max(0, Math.min(100, Number(item.value || 0)))}%`,
+                              background: item.color,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {prediction.explanation ? (
+                    <div
+                      style={{
+                        background: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: "18px",
+                        padding: "16px",
+                        color: "#1e3a8a",
+                        fontSize: "14px",
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      <strong>Model note:</strong> {prediction.explanation}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "24px",
+                padding: "22px",
+                border: "1px solid #e5e7eb",
+                boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+              }}
+            >
+              <h2 style={{ marginTop: 0, marginBottom: "6px", fontSize: "24px" }}>
+                Why this prediction
+              </h2>
+              <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "18px" }}>
+                Rule-based explanation using team strength, recent form, venue splits, and head-to-head trends
+              </div>
+
+              <div style={{ display: "grid", gap: "12px" }}>
+                {reasoningPoints.map((point, index) => (
+                  <div
+                    key={`${index}-${point}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "32px 1fr",
+                      gap: "12px",
+                      alignItems: "start",
+                      background: "#f9fafb",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "18px",
+                      padding: "14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: "999px",
+                        background: "#dbeafe",
+                        color: "#1d4ed8",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 800,
+                        fontSize: "13px",
+                      }}
+                    >
+                      {index + 1}
+                    </div>
+                    <div style={{ fontSize: "14px", lineHeight: 1.6, color: "#1f2937" }}>{point}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
 
