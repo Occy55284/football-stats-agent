@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
@@ -117,7 +118,12 @@ function confidenceTone(value?: string | null) {
   };
 }
 
-function edgeLabel(home?: number | null, away?: number | null, stronger = "Home", weaker = "Away") {
+function edgeLabel(
+  home?: number | null,
+  away?: number | null,
+  stronger = "Home",
+  weaker = "Away"
+) {
   const h = Number(home || 0);
   const a = Number(away || 0);
   const diff = h - a;
@@ -128,7 +134,7 @@ function edgeLabel(home?: number | null, away?: number | null, stronger = "Home"
 }
 
 function metricBarWidth(value?: number | null, max = 100) {
-  const pct = Math.max(0, Math.min(100, ((Number(value || 0) / max) * 100)));
+  const pct = Math.max(0, Math.min(100, (Number(value || 0) / max) * 100));
   return `${pct}%`;
 }
 
@@ -442,138 +448,62 @@ export default async function HomePage() {
                 );
 
                 return (
-                  <div
+                  <Link
                     key={`${prediction.fixture_id || index}-${index}`}
+                    href={prediction.fixture_id ? `/match/${prediction.fixture_id}` : "#"}
                     style={{
-                      padding: "18px",
-                      borderRadius: "22px",
-                      background: "#f9fafb",
-                      border: "1px solid #e5e7eb",
+                      textDecoration: "none",
+                      color: "inherit",
+                      display: "block",
                     }}
                   >
                     <div
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: "12px",
-                        alignItems: "flex-start",
-                        flexWrap: "wrap",
-                        marginBottom: "14px",
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "5px" }}>
-                          {homeName} v {awayName}
-                        </div>
-                        <div style={{ fontSize: "14px", color: "#6b7280" }}>
-                          {formatDate(prediction.fixture?.utc_date)}
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          background: tone.bg,
-                          color: tone.text,
-                          border: `1px solid ${tone.border}`,
-                          borderRadius: "999px",
-                          padding: "8px 12px",
-                          fontSize: "12px",
-                          fontWeight: 800,
-                        }}
-                      >
-                        {confidence} confidence
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        gap: "14px",
+                        padding: "18px",
+                        borderRadius: "22px",
+                        background: "#f9fafb",
+                        border: "1px solid #e5e7eb",
+                        transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                        boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
+                        cursor: prediction.fixture_id ? "pointer" : "default",
                       }}
                     >
                       <div
                         style={{
-                          background: "#ffffff",
-                          borderRadius: "18px",
-                          padding: "16px",
-                          border: "1px solid #e5e7eb",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "12px",
+                          alignItems: "flex-start",
+                          flexWrap: "wrap",
+                          marginBottom: "14px",
                         }}
                       >
-                        <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "8px" }}>
-                          Predicted score
-                        </div>
-                        <div style={{ fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>
-                          {formatOneDecimal(prediction.predicted_home_goals)} -{" "}
-                          {formatOneDecimal(prediction.predicted_away_goals)}
-                        </div>
-                        <div style={{ fontSize: "14px", color: "#374151" }}>
-                          Lean: <strong>{resultLabel(prediction.predicted_result)}</strong>
-                        </div>
-                        <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "8px" }}>
-                          Model: <strong>{prediction.model_version || "-"}</strong>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          borderRadius: "18px",
-                          padding: "16px",
-                          border: "1px solid #e5e7eb",
-                        }}
-                      >
-                        <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "10px" }}>
-                          Win probabilities
-                        </div>
-
-                        <div style={{ display: "grid", gap: "10px", fontSize: "14px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span>{homeName}</span>
-                            <strong>{formatPct(prediction.home_win_pct)}</strong>
+                        <div>
+                          <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "5px" }}>
+                            {homeName} v {awayName}
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span>Draw</span>
-                            <strong>{formatPct(prediction.draw_pct)}</strong>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span>{awayName}</span>
-                            <strong>{formatPct(prediction.away_win_pct)}</strong>
+                          <div style={{ fontSize: "14px", color: "#6b7280" }}>
+                            {formatDate(prediction.fixture?.utc_date)}
                           </div>
                         </div>
-                      </div>
-                    </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "10px",
-                        flexWrap: "wrap",
-                        marginTop: "14px",
-                      }}
-                    >
-                      {[strengthEdge, attackEdge, formEdge].map((badge) => (
                         <div
-                          key={badge}
                           style={{
-                            background: "#eff6ff",
-                            color: "#1d4ed8",
-                            border: "1px solid #bfdbfe",
+                            background: tone.bg,
+                            color: tone.text,
+                            border: `1px solid ${tone.border}`,
                             borderRadius: "999px",
-                            padding: "7px 10px",
+                            padding: "8px 12px",
                             fontSize: "12px",
-                            fontWeight: 700,
+                            fontWeight: 800,
                           }}
                         >
-                          {badge}
+                          {confidence} confidence
                         </div>
-                      ))}
-                    </div>
+                      </div>
 
-                    {(homeSnapshot || awaySnapshot) && (
                       <div
                         style={{
-                          marginTop: "16px",
                           display: "grid",
                           gridTemplateColumns: "1fr 1fr",
                           gap: "14px",
@@ -583,111 +513,199 @@ export default async function HomePage() {
                           style={{
                             background: "#ffffff",
                             borderRadius: "18px",
-                            padding: "14px",
+                            padding: "16px",
                             border: "1px solid #e5e7eb",
                           }}
                         >
-                          <div style={{ fontWeight: 800, marginBottom: "10px" }}>{homeName}</div>
-
-                          {[
-                            ["Strength", homeSnapshot?.overall_strength_score, 100],
-                            ["Attack", homeSnapshot?.attack_score, 200],
-                            ["Defence", homeSnapshot?.defence_score, 200],
-                            ["Form", homeSnapshot?.last_5_points, 15],
-                          ].map(([label, value, max]) => (
-                            <div key={String(label)} style={{ marginBottom: "10px" }}>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  fontSize: "12px",
-                                  marginBottom: "4px",
-                                }}
-                              >
-                                <span>{label}</span>
-                                <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
-                              </div>
-                              <div
-                                style={{
-                                  height: "8px",
-                                  background: "#e5e7eb",
-                                  borderRadius: "999px",
-                                  overflow: "hidden",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    width: metricBarWidth(value as number, max as number),
-                                    height: "100%",
-                                    background: "#2563eb",
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          ))}
+                          <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "8px" }}>
+                            Predicted score
+                          </div>
+                          <div style={{ fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>
+                            {formatOneDecimal(prediction.predicted_home_goals)} -{" "}
+                            {formatOneDecimal(prediction.predicted_away_goals)}
+                          </div>
+                          <div style={{ fontSize: "14px", color: "#374151" }}>
+                            Lean: <strong>{resultLabel(prediction.predicted_result)}</strong>
+                          </div>
+                          <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "8px" }}>
+                            Model: <strong>{prediction.model_version || "-"}</strong>
+                          </div>
                         </div>
 
                         <div
                           style={{
                             background: "#ffffff",
                             borderRadius: "18px",
-                            padding: "14px",
+                            padding: "16px",
                             border: "1px solid #e5e7eb",
                           }}
                         >
-                          <div style={{ fontWeight: 800, marginBottom: "10px" }}>{awayName}</div>
+                          <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "10px" }}>
+                            Win probabilities
+                          </div>
 
-                          {[
-                            ["Strength", awaySnapshot?.overall_strength_score, 100],
-                            ["Attack", awaySnapshot?.attack_score, 200],
-                            ["Defence", awaySnapshot?.defence_score, 200],
-                            ["Form", awaySnapshot?.last_5_points, 15],
-                          ].map(([label, value, max]) => (
-                            <div key={String(label)} style={{ marginBottom: "10px" }}>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  fontSize: "12px",
-                                  marginBottom: "4px",
-                                }}
-                              >
-                                <span>{label}</span>
-                                <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
-                              </div>
-                              <div
-                                style={{
-                                  height: "8px",
-                                  background: "#e5e7eb",
-                                  borderRadius: "999px",
-                                  overflow: "hidden",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    width: metricBarWidth(value as number, max as number),
-                                    height: "100%",
-                                    background: "#111827",
-                                  }}
-                                />
-                              </div>
+                          <div style={{ display: "grid", gap: "10px", fontSize: "14px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span>{homeName}</span>
+                              <strong>{formatPct(prediction.home_win_pct)}</strong>
                             </div>
-                          ))}
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span>Draw</span>
+                              <strong>{formatPct(prediction.draw_pct)}</strong>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span>{awayName}</span>
+                              <strong>{formatPct(prediction.away_win_pct)}</strong>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    )}
 
-                    <div
-                      style={{
-                        marginTop: "14px",
-                        fontSize: "14px",
-                        color: "#374151",
-                        lineHeight: 1.55,
-                      }}
-                    >
-                      {prediction.explanation || "No explanation available yet."}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "10px",
+                          flexWrap: "wrap",
+                          marginTop: "14px",
+                        }}
+                      >
+                        {[strengthEdge, attackEdge, formEdge].map((badge) => (
+                          <div
+                            key={badge}
+                            style={{
+                              background: "#eff6ff",
+                              color: "#1d4ed8",
+                              border: "1px solid #bfdbfe",
+                              borderRadius: "999px",
+                              padding: "7px 10px",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {badge}
+                          </div>
+                        ))}
+                      </div>
+
+                      {(homeSnapshot || awaySnapshot) && (
+                        <div
+                          style={{
+                            marginTop: "16px",
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: "14px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              background: "#ffffff",
+                              borderRadius: "18px",
+                              padding: "14px",
+                              border: "1px solid #e5e7eb",
+                            }}
+                          >
+                            <div style={{ fontWeight: 800, marginBottom: "10px" }}>{homeName}</div>
+
+                            {[
+                              ["Strength", homeSnapshot?.overall_strength_score, 100],
+                              ["Attack", homeSnapshot?.attack_score, 200],
+                              ["Defence", homeSnapshot?.defence_score, 200],
+                              ["Form", homeSnapshot?.last_5_points, 15],
+                            ].map(([label, value, max]) => (
+                              <div key={String(label)} style={{ marginBottom: "10px" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    fontSize: "12px",
+                                    marginBottom: "4px",
+                                  }}
+                                >
+                                  <span>{label}</span>
+                                  <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
+                                </div>
+                                <div
+                                  style={{
+                                    height: "8px",
+                                    background: "#e5e7eb",
+                                    borderRadius: "999px",
+                                    overflow: "hidden",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: metricBarWidth(value as number, max as number),
+                                      height: "100%",
+                                      background: "#2563eb",
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div
+                            style={{
+                              background: "#ffffff",
+                              borderRadius: "18px",
+                              padding: "14px",
+                              border: "1px solid #e5e7eb",
+                            }}
+                          >
+                            <div style={{ fontWeight: 800, marginBottom: "10px" }}>{awayName}</div>
+
+                            {[
+                              ["Strength", awaySnapshot?.overall_strength_score, 100],
+                              ["Attack", awaySnapshot?.attack_score, 200],
+                              ["Defence", awaySnapshot?.defence_score, 200],
+                              ["Form", awaySnapshot?.last_5_points, 15],
+                            ].map(([label, value, max]) => (
+                              <div key={String(label)} style={{ marginBottom: "10px" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    fontSize: "12px",
+                                    marginBottom: "4px",
+                                  }}
+                                >
+                                  <span>{label}</span>
+                                  <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
+                                </div>
+                                <div
+                                  style={{
+                                    height: "8px",
+                                    background: "#e5e7eb",
+                                    borderRadius: "999px",
+                                    overflow: "hidden",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: metricBarWidth(value as number, max as number),
+                                      height: "100%",
+                                      background: "#111827",
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          marginTop: "14px",
+                          fontSize: "14px",
+                          color: "#374151",
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        {prediction.explanation || "No explanation available yet."}
+                      </div>
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
 
