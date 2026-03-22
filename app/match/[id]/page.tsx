@@ -45,6 +45,11 @@ type TeamSnapshotRow = {
   team_id: string;
   league_code?: string | null;
   season?: number | null;
+  points?: number | null;
+  wins?: number | null;
+  draws?: number | null;
+  losses?: number | null;
+  goal_difference?: number | null;
   last_5_points?: number | null;
   last_5_wins?: number | null;
   last_5_draws?: number | null;
@@ -57,6 +62,14 @@ type TeamSnapshotRow = {
   attack_score?: number | null;
   defence_score?: number | null;
   overall_strength_score?: number | null;
+};
+
+type StandingRow = {
+  team_id: string;
+  position?: number | null;
+  points?: number | null;
+  played_games?: number | null;
+  goal_difference?: number | null;
 };
 
 const FINISHED_STATUSES = ["FINISHED", "FT", "AET", "PEN"];
@@ -135,6 +148,11 @@ function confidenceTone(value?: string | null) {
 
 function firstNumber(value?: number | null) {
   return Number(value || 0);
+}
+
+function formatSigned(value?: number | null) {
+  const n = Number(value || 0);
+  return n > 0 ? `+${n}` : `${n}`;
 }
 
 function getOpponentName(
@@ -447,6 +465,11 @@ async function getTeamSnapshot(
       team_id,
       league_code,
       season,
+      points,
+      wins,
+      draws,
+      losses,
+      goal_difference,
       last_5_points,
       last_5_wins,
       last_5_draws,
@@ -467,6 +490,30 @@ async function getTeamSnapshot(
 
   const { data } = await query.maybeSingle();
   return (data as TeamSnapshotRow | null) || null;
+}
+
+async function getTeamStanding(
+  supabase: any,
+  teamId: string,
+  leagueCode?: string | null,
+  season?: number | null
+) {
+  let query = supabase
+    .from("standings")
+    .select(`
+      team_id,
+      position,
+      points,
+      played_games,
+      goal_difference
+    `)
+    .eq("team_id", teamId);
+
+  if (leagueCode) query = query.eq("league_code", leagueCode);
+  if (season) query = query.eq("season", season);
+
+  const { data } = await query.maybeSingle();
+  return (data as StandingRow | null) || null;
 }
 
 async function getTeamsMap(
@@ -856,6 +903,130 @@ function SplitFormCard({
   );
 }
 
+function TableContextCard({
+  title,
+  accent,
+  teamName,
+  crest,
+  standing,
+  snapshot,
+}: {
+  title: string;
+  accent: "blue" | "teal";
+  teamName: string;
+  crest?: string | null;
+  standing: StandingRow | null;
+  snapshot: TeamSnapshotRow | null;
+}) {
+  const accentBg = accent === "blue" ? "#dbeafe" : "#ccfbf1";
+  const accentText = accent === "blue" ? "#1d4ed8" : "#0f766e";
+
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        borderRadius: "20px",
+        padding: "18px",
+        border: "1px solid #e5e7eb",
+        boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+      }}
+    >
+      <div
+        style={{
+          display: "inline-block",
+          borderRadius: "999px",
+          padding: "6px 10px",
+          background: accentBg,
+          color: accentText,
+          fontSize: "12px",
+          fontWeight: 800,
+          marginBottom: "12px",
+        }}
+      >
+        {title}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+        {crest ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={crest}
+            alt={teamName}
+            style={{
+              width: 42,
+              height: 42,
+              objectFit: "contain",
+              background: "#ffffff",
+              borderRadius: "999px",
+              padding: 4,
+              border: "1px solid #d1d5db",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: "999px",
+              background: "#e5e7eb",
+              border: "1px solid #d1d5db",
+            }}
+          />
+        )}
+
+        <div>
+          <div style={{ fontSize: "18px", fontWeight: 800 }}>{teamName}</div>
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>League standing context</div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: "12px",
+        }}
+      >
+        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Rank</div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>{standing?.position ?? "-"}</div>
+        </div>
+
+        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Points</div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>{standing?.points ?? snapshot?.points ?? "-"}</div>
+        </div>
+
+        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Goal diff</div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>{formatSigned(standing?.goal_difference ?? snapshot?.goal_difference)}</div>
+        </div>
+
+        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Played</div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>{standing?.played_games ?? "-"}</div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: "12px",
+          background: "#f9fafb",
+          border: "1px solid #e5e7eb",
+          borderRadius: "16px",
+          padding: "12px",
+        }}
+      >
+        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Season record</div>
+        <div style={{ fontSize: "22px", fontWeight: 800 }}>
+          {snapshot ? `${snapshot.wins ?? 0}-${snapshot.draws ?? 0}-${snapshot.losses ?? 0}` : "-"}
+        </div>
+        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "4px" }}>Wins • draws • losses</div>
+      </div>
+    </div>
+  );
+}
+
 function FixtureList({
   title,
   fixtures,
@@ -988,6 +1159,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
     initialTeamMap,
     homeSnapshot,
     awaySnapshot,
+    homeStanding,
+    awayStanding,
   ] = await Promise.all([
     getPredictionForFixture(supabase, fixture.id),
     getRecentTeamFixtures(
@@ -1031,6 +1204,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
     getTeamsMap(supabase, [homeTeamId, awayTeamId]),
     getTeamSnapshot(supabase, homeTeamId, fixture.league_code, fixture.season),
     getTeamSnapshot(supabase, awayTeamId, fixture.league_code, fixture.season),
+    getTeamStanding(supabase, homeTeamId, fixture.league_code, fixture.season),
+    getTeamStanding(supabase, awayTeamId, fixture.league_code, fixture.season),
   ]);
 
   const extraTeamIds = [
@@ -1301,6 +1476,49 @@ export default async function MatchDetailsPage({ params }: PageProps) {
               fixtures={awayAwayRecent}
               teamId={awayTeamId}
               accent="teal"
+            />
+          </div>
+        </section>
+
+        <section
+          style={{
+            background: "#ffffff",
+            borderRadius: "24px",
+            padding: "22px",
+            border: "1px solid #e5e7eb",
+            boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            marginBottom: "28px",
+          }}
+        >
+          <h2 style={{ marginTop: 0, marginBottom: "6px", fontSize: "24px" }}>
+            League Table Context
+          </h2>
+          <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "18px" }}>
+            Current rank, points, goal difference, and season record for both sides
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "16px",
+            }}
+          >
+            <TableContextCard
+              title="Home table context"
+              accent="blue"
+              teamName={homeTeam?.name || "Home"}
+              crest={homeTeam?.crest}
+              standing={homeStanding}
+              snapshot={homeSnapshot}
+            />
+            <TableContextCard
+              title="Away table context"
+              accent="teal"
+              teamName={awayTeam?.name || "Away"}
+              crest={awayTeam?.crest}
+              standing={awayStanding}
+              snapshot={awaySnapshot}
             />
           </div>
         </section>
