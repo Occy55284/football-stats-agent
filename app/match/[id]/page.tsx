@@ -85,13 +85,22 @@ function getOutcomeForTeam(fixture: FixtureRow, teamId: string) {
 }
 
 function getOutcomeClasses(result: "W" | "D" | "L") {
-  if (result === "W") return "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
-  if (result === "L") return "bg-red-500/20 text-red-300 border border-red-500/30";
-  return "bg-amber-500/20 text-amber-300 border border-amber-500/30";
+  if (result === "W") {
+    return "border-emerald-500/30 bg-emerald-500/15 text-emerald-300";
+  }
+  if (result === "L") {
+    return "border-red-500/30 bg-red-500/15 text-red-300";
+  }
+  return "border-amber-500/30 bg-amber-500/15 text-amber-300";
 }
 
-function getOpponentName(fixture: FixtureRow, teamId: string, teamMap: Record<string, TeamRow>) {
-  const opponentId = fixture.home_team_id === teamId ? fixture.away_team_id : fixture.home_team_id;
+function getOpponentName(
+  fixture: FixtureRow,
+  teamId: string,
+  teamMap: Record<string, TeamRow>
+) {
+  const opponentId =
+    fixture.home_team_id === teamId ? fixture.away_team_id : fixture.home_team_id;
   if (!opponentId) return "Unknown";
   return teamMap[opponentId]?.name || "Unknown";
 }
@@ -261,6 +270,58 @@ async function getHeadToHeadFixtures(
   return (data || []) as FixtureRow[];
 }
 
+function resultLabel(value?: string | null) {
+  if (value === "HOME") return "Home win";
+  if (value === "AWAY") return "Away win";
+  if (value === "DRAW") return "Draw";
+  return value || "N/A";
+}
+
+function TeamCrest({
+  team,
+  size = "large",
+}: {
+  team?: TeamRow;
+  size?: "small" | "large";
+}) {
+  const classes =
+    size === "small"
+      ? "h-10 w-10"
+      : "h-16 w-16 md:h-20 md:w-20";
+
+  if (team?.crest) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={team.crest}
+        alt={team.name || "Team crest"}
+        className={`${classes} rounded-full border border-zinc-700 bg-white object-contain p-1 shadow-lg`}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`${classes} rounded-full border border-zinc-700 bg-zinc-800 shadow-lg`}
+    />
+  );
+}
+
+function StatMiniCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 text-center">
+      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-2 text-lg font-semibold text-white">{value}</div>
+    </div>
+  );
+}
+
 function PercentBar({
   label,
   value,
@@ -271,14 +332,14 @@ function PercentBar({
   const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-sm text-zinc-300">
-        <span>{label}</span>
-        <span>{safeValue}%</span>
+    <div>
+      <div className="mb-2 flex items-center justify-between text-sm">
+        <span className="text-zinc-300">{label}</span>
+        <span className="font-medium text-white">{safeValue}%</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
+      <div className="h-2.5 overflow-hidden rounded-full bg-zinc-800">
         <div
-          className="h-2 rounded-full bg-sky-500"
+          className="h-2.5 rounded-full bg-cyan-400"
           style={{ width: `${safeValue}%` }}
         />
       </div>
@@ -286,48 +347,67 @@ function PercentBar({
   );
 }
 
-function TeamBadge({
-  team,
-  align = "left",
+function FormDots({
+  fixtures,
+  teamId,
 }: {
-  team?: TeamRow;
-  align?: "left" | "right";
+  fixtures: FixtureRow[];
+  teamId: string;
 }) {
   return (
-    <div className={`flex items-center gap-3 ${align === "right" ? "justify-end" : ""}`}>
-      {align === "right" ? (
-        <>
-          <div className="text-right">
-            <div className="font-semibold text-white">{team?.name || "Unknown team"}</div>
+    <div className="flex items-center gap-2">
+      {fixtures.map((fixture) => {
+        const result = getOutcomeForTeam(fixture, teamId);
+        return (
+          <span
+            key={fixture.id}
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border text-xs font-bold ${getOutcomeClasses(
+              result
+            )}`}
+          >
+            {result}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function TeamFormSummaryCard({
+  team,
+  fixtures,
+  teamId,
+}: {
+  team?: TeamRow;
+  fixtures: FixtureRow[];
+  teamId: string;
+}) {
+  const summary = summariseForm(fixtures, teamId);
+
+  return (
+    <div className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-5">
+      <div className="flex items-center gap-4">
+        <TeamCrest team={team} size="small" />
+        <div className="min-w-0">
+          <div className="truncate text-lg font-semibold text-white">
+            {team?.name || "Team"}
           </div>
-          {team?.crest ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={team.crest}
-              alt={team.name || "Team crest"}
-              className="h-10 w-10 rounded-full bg-white object-contain p-1"
-            />
-          ) : (
-            <div className="h-10 w-10 rounded-full border border-zinc-700 bg-zinc-800" />
-          )}
-        </>
-      ) : (
-        <>
-          {team?.crest ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={team.crest}
-              alt={team.name || "Team crest"}
-              className="h-10 w-10 rounded-full bg-white object-contain p-1"
-            />
-          ) : (
-            <div className="h-10 w-10 rounded-full border border-zinc-700 bg-zinc-800" />
-          )}
-          <div>
-            <div className="font-semibold text-white">{team?.name || "Unknown team"}</div>
+          <div className="mt-2">
+            <FormDots fixtures={fixtures} teamId={teamId} />
           </div>
-        </>
-      )}
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <StatMiniCard
+          label="W-D-L"
+          value={`${summary.wins}-${summary.draws}-${summary.losses}`}
+        />
+        <StatMiniCard
+          label="GF-GA"
+          value={`${summary.goalsFor}-${summary.goalsAgainst}`}
+        />
+      </div>
     </div>
   );
 }
@@ -343,34 +423,20 @@ function FormList({
   teamId: string;
   teamMap: Record<string, TeamRow>;
 }) {
-  const summary = summariseForm(fixtures, teamId);
-
   return (
-    <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
-      <div className="mb-4 flex items-start justify-between gap-4">
+    <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
+      <div className="mb-5 flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
-          <p className="text-sm text-zinc-400">Last {fixtures.length} completed matches</p>
-        </div>
-        <div className="text-right text-sm text-zinc-300">
-          <div>
-            W-D-L:{" "}
-            <span className="font-semibold text-white">
-              {summary.wins}-{summary.draws}-{summary.losses}
-            </span>
-          </div>
-          <div>
-            GF-GA:{" "}
-            <span className="font-semibold text-white">
-              {summary.goalsFor}-{summary.goalsAgainst}
-            </span>
-          </div>
+          <h2 className="text-xl font-semibold text-white">{title}</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Last {fixtures.length} completed matches
+          </p>
         </div>
       </div>
 
       <div className="space-y-3">
         {fixtures.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
+          <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
             No recent completed matches found.
           </div>
         ) : (
@@ -383,26 +449,28 @@ function FormList({
             return (
               <div
                 key={fixture.id}
-                className="flex items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
+                className="rounded-2xl border border-zinc-800 bg-black/30 p-4 transition hover:border-zinc-700 hover:bg-black/40"
               >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-white">
-                    {isHome ? "vs" : "at"} {opponent}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-semibold text-white">
+                      {isHome ? "vs" : "at"} {opponent}
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-400">
+                      {formatDate(fixture.utc_date)} • {isHome ? "Home" : "Away"}
+                    </div>
                   </div>
-                  <div className="text-xs text-zinc-400">
-                    {formatDate(fixture.utc_date)} • {isHome ? "Home" : "Away"}
-                  </div>
-                </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="text-sm font-semibold text-white">{score}</div>
-                  <span
-                    className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${getOutcomeClasses(
-                      result
-                    )}`}
-                  >
-                    {result}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <div className="text-base font-bold text-white">{score}</div>
+                    <span
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-xs font-bold ${getOutcomeClasses(
+                        result
+                      )}`}
+                    >
+                      {result}
+                    </span>
+                  </div>
                 </div>
               </div>
             );
@@ -411,13 +479,6 @@ function FormList({
       </div>
     </section>
   );
-}
-
-function resultLabel(value?: string | null) {
-  if (value === "HOME") return "Home win";
-  if (value === "AWAY") return "Away win";
-  if (value === "DRAW") return "Draw";
-  return value || "N/A";
 }
 
 export default async function MatchDetailsPage({ params }: PageProps) {
@@ -475,219 +536,210 @@ export default async function MatchDetailsPage({ params }: PageProps) {
   const homeTeam = teamMap[homeTeamId];
   const awayTeam = teamMap[awayTeamId];
 
-  const homeFormSummary = summariseForm(homeRecent, homeTeamId);
-  const awayFormSummary = summariseForm(awayRecent, awayTeamId);
-
   return (
-    <main className="min-h-screen bg-black text-white">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.12),transparent_20%),radial-gradient(circle_at_top_right,rgba(6,182,212,0.12),transparent_25%),#050505] text-white">
       <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 lg:px-8">
         <div className="mb-6">
           <Link
             href="/"
-            className="inline-flex items-center rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
+            className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-900/80 px-4 py-2 text-sm text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800"
           >
             ← Back to predictions
           </Link>
         </div>
 
-        <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6 md:p-8">
-          <div className="grid gap-6 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-            <TeamBadge team={homeTeam} />
-
-            <div className="text-center">
-              <div className="text-xs uppercase tracking-[0.2em] text-zinc-400">
-                {fixture.league_code || "League"}{fixture.season ? ` • ${fixture.season}` : ""}
+        <section className="overflow-hidden rounded-[32px] border border-zinc-800 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black shadow-2xl">
+          <div className="border-b border-zinc-800 px-6 py-4 md:px-8">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs uppercase tracking-[0.22em] text-zinc-400">
+                {fixture.league_code || "League"}
+                {fixture.season ? ` • ${fixture.season}` : ""}
               </div>
+              <div className="text-sm text-zinc-400">{formatDateTime(fixture.utc_date)}</div>
+            </div>
+          </div>
 
-              <div className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                {homeTeam?.name || "Home"}{" "}
-                <span className="text-zinc-500">vs</span>{" "}
-                {awayTeam?.name || "Away"}
+          <div className="grid gap-8 px-6 py-8 md:px-8 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+            <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
+              <TeamCrest team={homeTeam} />
+              <div className="mt-4 text-2xl font-bold text-white md:text-3xl">
+                {homeTeam?.name || "Home"}
               </div>
-
-              <div className="mt-3 text-sm text-zinc-300">
-                {formatDateTime(fixture.utc_date)}
-              </div>
-
-              {isFinishedMatch(fixture) ? (
-                <div className="mt-5 inline-flex items-center gap-3 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3">
-                  <span className="text-xs uppercase tracking-wide text-zinc-400">
-                    Final score
-                  </span>
-                  <span className="text-2xl font-bold text-white">
-                    {fixture.home_score ?? "-"} - {fixture.away_score ?? "-"}
-                  </span>
-                </div>
-              ) : (
-                <div className="mt-5 inline-flex items-center gap-2 rounded-2xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-300">
-                  Upcoming match
-                </div>
-              )}
+              <div className="mt-2 text-sm text-zinc-400">Home side</div>
             </div>
 
-            <TeamBadge team={awayTeam} align="right" />
+            <div className="min-w-[260px] text-center">
+              <div className="text-sm uppercase tracking-[0.18em] text-zinc-500">Match Centre</div>
+
+              {isFinishedMatch(fixture) ? (
+                <div className="mt-5">
+                  <div className="flex items-center justify-center gap-4">
+                    <span className="text-5xl font-extrabold tracking-tight text-white md:text-6xl">
+                      {fixture.home_score ?? "-"}
+                    </span>
+                    <span className="text-2xl font-semibold text-zinc-500">-</span>
+                    <span className="text-5xl font-extrabold tracking-tight text-white md:text-6xl">
+                      {fixture.away_score ?? "-"}
+                    </span>
+                  </div>
+                  <div className="mt-3 inline-flex rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-300">
+                    Final result
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-5">
+                  <div className="text-4xl font-extrabold tracking-tight text-white md:text-5xl">
+                    vs
+                  </div>
+                  <div className="mt-3 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-1.5 text-sm font-medium text-cyan-300">
+                    Upcoming fixture
+                  </div>
+                </div>
+              )}
+
+              {prediction ? (
+                <div className="mx-auto mt-6 max-w-md rounded-3xl border border-zinc-800 bg-zinc-900/70 p-4">
+                  <div className="text-xs uppercase tracking-wide text-zinc-500">
+                    Model prediction
+                  </div>
+                  <div className="mt-2 text-xl font-semibold text-white">
+                    {resultLabel(prediction.predicted_result)}
+                  </div>
+                  <div className="mt-2 text-sm text-zinc-400">
+                    Predicted score: {prediction.predicted_home_goals ?? "-"} -{" "}
+                    {prediction.predicted_away_goals ?? "-"}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col items-center text-center lg:items-end lg:text-right">
+              <TeamCrest team={awayTeam} />
+              <div className="mt-4 text-2xl font-bold text-white md:text-3xl">
+                {awayTeam?.name || "Away"}
+              </div>
+              <div className="mt-2 text-sm text-zinc-400">Away side</div>
+            </div>
           </div>
         </section>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
-            <h2 className="text-lg font-semibold text-white">Recent results snapshot</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Rolling form from each side&apos;s last five completed matches before this fixture.
-            </p>
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <TeamFormSummaryCard team={homeTeam} fixtures={homeRecent} teamId={homeTeamId} />
+          <TeamFormSummaryCard team={awayTeam} fixtures={awayRecent} teamId={awayTeamId} />
+        </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
-                <div className="text-sm font-semibold text-white">
-                  {homeTeam?.name || "Home team"}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl bg-zinc-900 p-3">
-                    <div className="text-zinc-400">W-D-L</div>
-                    <div className="mt-1 font-semibold text-white">
-                      {homeFormSummary.wins}-{homeFormSummary.draws}-{homeFormSummary.losses}
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-zinc-900 p-3">
-                    <div className="text-zinc-400">GF-GA</div>
-                    <div className="mt-1 font-semibold text-white">
-                      {homeFormSummary.goalsFor}-{homeFormSummary.goalsAgainst}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
-                <div className="text-right text-sm font-semibold text-white">
-                  {awayTeam?.name || "Away team"}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl bg-zinc-900 p-3">
-                    <div className="text-zinc-400">W-D-L</div>
-                    <div className="mt-1 font-semibold text-white">
-                      {awayFormSummary.wins}-{awayFormSummary.draws}-{awayFormSummary.losses}
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-zinc-900 p-3">
-                    <div className="text-zinc-400">GF-GA</div>
-                    <div className="mt-1 font-semibold text-white">
-                      {awayFormSummary.goalsFor}-{awayFormSummary.goalsAgainst}
-                    </div>
-                  </div>
-                </div>
+        <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-white">Prediction insight</h2>
+                <p className="mt-1 text-sm text-zinc-400">
+                  Stored probabilities and model commentary for this fixture
+                </p>
               </div>
             </div>
-          </section>
-
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
-            <h2 className="text-lg font-semibold text-white">Prediction insight</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Current stored model output for this fixture.
-            </p>
 
             {!prediction ? (
-              <div className="mt-4 rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
+              <div className="mt-5 rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
                 No prediction found for this match yet.
               </div>
             ) : (
-              <div className="mt-4 space-y-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-                    <div className="text-xs uppercase tracking-wide text-zinc-400">Outcome</div>
-                    <div className="mt-2 text-xl font-semibold text-white">
-                      {resultLabel(prediction.predicted_result)}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-                    <div className="text-xs uppercase tracking-wide text-zinc-400">Confidence</div>
-                    <div className="mt-2 text-xl font-semibold text-white">
-                      {prediction.confidence_label || prediction.confidence || "Medium"}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-                    <div className="text-xs uppercase tracking-wide text-zinc-400">
-                      Predicted score
-                    </div>
-                    <div className="mt-2 text-xl font-semibold text-white">
-                      {prediction.predicted_home_goals ?? "-"} -{" "}
-                      {prediction.predicted_away_goals ?? "-"}
-                    </div>
-                  </div>
+              <>
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  <StatMiniCard
+                    label="Outcome"
+                    value={resultLabel(prediction.predicted_result)}
+                  />
+                  <StatMiniCard
+                    label="Confidence"
+                    value={prediction.confidence_label || prediction.confidence || "Medium"}
+                  />
+                  <StatMiniCard
+                    label="Predicted score"
+                    value={`${prediction.predicted_home_goals ?? "-"} - ${
+                      prediction.predicted_away_goals ?? "-"
+                    }`}
+                  />
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-                  <PercentBar label={`${homeTeam?.name || "Home"} win`} value={prediction.home_win_pct} />
-                  <PercentBar label="Draw" value={prediction.draw_pct} />
-                  <PercentBar label={`${awayTeam?.name || "Away"} win`} value={prediction.away_win_pct} />
+                <div className="mt-5 rounded-3xl border border-zinc-800 bg-black/30 p-5">
+                  <div className="space-y-4">
+                    <PercentBar
+                      label={`${homeTeam?.name || "Home"} win`}
+                      value={prediction.home_win_pct}
+                    />
+                    <PercentBar label="Draw" value={prediction.draw_pct} />
+                    <PercentBar
+                      label={`${awayTeam?.name || "Away"} win`}
+                      value={prediction.away_win_pct}
+                    />
+                  </div>
                 </div>
 
                 {prediction.explanation ? (
-                  <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-4 text-sm text-sky-100">
+                  <div className="mt-5 rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-5 text-sm text-cyan-100">
                     <span className="font-semibold">Model note:</span> {prediction.explanation}
                   </div>
                 ) : null}
-              </div>
+              </>
             )}
+          </section>
+
+          <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
+            <div>
+              <h2 className="text-xl font-semibold text-white">Head-to-head</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Last {MAX_H2H} completed meetings before this fixture
+              </p>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {h2h.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
+                  No completed head-to-head matches found.
+                </div>
+              ) : (
+                h2h.map((game) => (
+                  <div
+                    key={game.id}
+                    className="rounded-2xl border border-zinc-800 bg-black/30 p-4 transition hover:border-zinc-700"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="truncate text-base font-semibold text-white">
+                          {teamMap[game.home_team_id || ""]?.name || "Home"} vs{" "}
+                          {teamMap[game.away_team_id || ""]?.name || "Away"}
+                        </div>
+                        <div className="mt-1 text-sm text-zinc-400">
+                          {formatDate(game.utc_date)}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-base font-bold text-white">
+                        {game.home_score ?? "-"} - {game.away_score ?? "-"}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </section>
         </div>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-3">
-          <div className="xl:col-span-1">
-            <section className="h-full rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
-              <h2 className="text-lg font-semibold text-white">Head-to-head</h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Last {MAX_H2H} completed meetings before this fixture.
-              </p>
+        <div className="mt-6 grid gap-6 xl:grid-cols-2">
+          <FormList
+            title={`${homeTeam?.name || "Home team"} last 5`}
+            fixtures={homeRecent}
+            teamId={homeTeamId}
+            teamMap={teamMap}
+          />
 
-              <div className="mt-4 space-y-3">
-                {h2h.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
-                    No completed head-to-head matches found.
-                  </div>
-                ) : (
-                  h2h.map((game) => (
-                    <div
-                      key={game.id}
-                      className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-white">
-                            {teamMap[game.home_team_id || ""]?.name || "Home"} vs{" "}
-                            {teamMap[game.away_team_id || ""]?.name || "Away"}
-                          </div>
-                          <div className="text-xs text-zinc-400">
-                            {formatDate(game.utc_date)}
-                          </div>
-                        </div>
-                        <div className="text-sm font-semibold text-white">
-                          {game.home_score ?? "-"} - {game.away_score ?? "-"}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-          </div>
-
-          <div className="xl:col-span-1">
-            <FormList
-              title={`${homeTeam?.name || "Home team"} last 5`}
-              fixtures={homeRecent}
-              teamId={homeTeamId}
-              teamMap={teamMap}
-            />
-          </div>
-
-          <div className="xl:col-span-1">
-            <FormList
-              title={`${awayTeam?.name || "Away team"} last 5`}
-              fixtures={awayRecent}
-              teamId={awayTeamId}
-              teamMap={teamMap}
-            />
-          </div>
+          <FormList
+            title={`${awayTeam?.name || "Away team"} last 5`}
+            fixtures={awayRecent}
+            teamId={awayTeamId}
+            teamMap={teamMap}
+          />
         </div>
       </div>
     </main>
