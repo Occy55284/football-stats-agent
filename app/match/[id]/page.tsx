@@ -72,6 +72,22 @@ type StandingRow = {
   goal_difference?: number | null;
 };
 
+type BettingInsightItem = {
+  label: string;
+  value: string;
+  tone: "blue" | "teal" | "amber" | "slate" | "red";
+  reason: string;
+};
+
+type BettingInsights = {
+  bestResult: BettingInsightItem;
+  btts: BettingInsightItem;
+  goals: BettingInsightItem;
+  confidence: BettingInsightItem;
+  risk: BettingInsightItem;
+  summary: string[];
+};
+
 const FINISHED_STATUSES = ["FINISHED", "FT", "AET", "PEN"];
 const MAX_RECENT = 5;
 const MAX_H2H = 5;
@@ -146,13 +162,37 @@ function confidenceTone(value?: string | null) {
   };
 }
 
+function insightToneStyles(tone: BettingInsightItem["tone"]) {
+  if (tone === "blue") {
+    return { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe", soft: "#dbeafe" };
+  }
+  if (tone === "teal") {
+    return { bg: "#ecfeff", text: "#0f766e", border: "#99f6e4", soft: "#ccfbf1" };
+  }
+  if (tone === "amber") {
+    return { bg: "#fffbeb", text: "#b45309", border: "#fde68a", soft: "#fef3c7" };
+  }
+  if (tone === "red") {
+    return { bg: "#fef2f2", text: "#b91c1c", border: "#fecaca", soft: "#fee2e2" };
+  }
+  return { bg: "#f8fafc", text: "#334155", border: "#cbd5e1", soft: "#e2e8f0" };
+}
+
 function firstNumber(value?: number | null) {
   return Number(value || 0);
+}
+
+function clamp(value: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function formatSigned(value?: number | null) {
   const n = Number(value || 0);
   return n > 0 ? `+${n}` : `${n}`;
+}
+
+function percentFromFive(value?: number | null) {
+  return Math.round((firstNumber(value) / 5) * 100);
 }
 
 function getOpponentName(
@@ -208,6 +248,7 @@ function summariseHeadToHead(
   let homeGoals = 0;
   let awayGoals = 0;
   let bttsCount = 0;
+  let over25Count = 0;
 
   for (const fixture of fixtures) {
     const homeGoalsInMatch = fixture.home_score ?? 0;
@@ -237,6 +278,10 @@ function summariseHeadToHead(
     if (actualHomeSideGoals > 0 && actualAwaySideGoals > 0) {
       bttsCount += 1;
     }
+
+    if (actualHomeSideGoals + actualAwaySideGoals > 2.5) {
+      over25Count += 1;
+    }
   }
 
   return {
@@ -246,6 +291,7 @@ function summariseHeadToHead(
     homeGoals,
     awayGoals,
     bttsCount,
+    over25Count,
   };
 }
 
@@ -278,6 +324,7 @@ function buildReasoningPoints({
     homeGoals: number;
     awayGoals: number;
     bttsCount: number;
+    over25Count: number;
   };
   h2hCount: number;
 }) {
@@ -381,32 +428,401 @@ function buildReasoningPoints({
         `Both teams are producing similar recent scoring output (${homeOverall.goalsFor} vs ${awayOverall.goalsFor} goals across the last five).`
       );
     }
-    if (h2hCount > 0 && h2hSummary.draws >= Math.max(h2hSummary.homeWins, h2hSummary.awayWins)) {
-      points.push(`Recent head-to-head meetings have been tight, with ${h2hSummary.draws} draws in the sample.`);
+    if (
+      h2hCount > 0 &&
+      h2hSummary.draws >= Math.max(h2hSummary.homeWins, h2hSummary.awayWins)
+    ) {
+      points.push(
+        `Recent head-to-head meetings have been tight, with ${h2hSummary.draws} draws in the sample.`
+      );
     }
   }
 
   if (h2hCount > 0 && h2hSummary.bttsCount >= 3) {
-    points.push(`There is a strong both-teams-to-score trend in the recent head-to-heads (${h2hSummary.bttsCount}/${h2hCount}).`);
+    points.push(
+      `There is a strong both-teams-to-score trend in the recent head-to-heads (${h2hSummary.bttsCount}/${h2hCount}).`
+    );
   }
 
   const homeBtts = firstNumber(homeSnapshot?.btts_for);
   const awayBtts = firstNumber(awaySnapshot?.btts_for);
   if (homeBtts >= 3 && awayBtts >= 3) {
-    points.push(`Both sides have shown frequent BTTS tendencies recently (${homeBtts} and ${awayBtts}).`);
+    points.push(
+      `Both sides have shown frequent BTTS tendencies recently (${homeBtts} and ${awayBtts}).`
+    );
   }
 
   const homeOver = firstNumber(homeSnapshot?.over_25_for);
   const awayOver = firstNumber(awaySnapshot?.over_25_for);
   if (homeOver >= 3 && awayOver >= 3) {
-    points.push(`Recent games suggest a decent chance of goals, with both teams often landing over 2.5.`);
+    points.push(
+      `Recent games suggest a decent chance of goals, with both teams often landing over 2.5.`
+    );
   }
 
   if (points.length === 0) {
-    points.push("The model is leaning on a mix of recent form, team strength scores, and venue-specific trends.");
+    points.push(
+      "The model is leaning on a mix of recent form, team strength scores, and venue-specific trends."
+    );
   }
 
   return points.slice(0, 5);
+}
+
+function buildBettingInsights({
+  prediction,
+  homeTeam,
+  awayTeam,
+  homeSnapshot,
+  awaySnapshot,
+  homeStanding,
+  awayStanding,
+  homeRecent,
+  awayRecent,
+  homeHomeRecent,
+  awayAwayRecent,
+  h2hSummary,
+  h2hCount,
+}: {
+  prediction: PredictionRow | null;
+  homeTeam?: TeamRow;
+  awayTeam?: TeamRow;
+  homeSnapshot: TeamSnapshotRow | null;
+  awaySnapshot: TeamSnapshotRow | null;
+  homeStanding: StandingRow | null;
+  awayStanding: StandingRow | null;
+  homeRecent: FixtureRow[];
+  awayRecent: FixtureRow[];
+  homeHomeRecent: FixtureRow[];
+  awayAwayRecent: FixtureRow[];
+  h2hSummary: {
+    homeWins: number;
+    draws: number;
+    awayWins: number;
+    homeGoals: number;
+    awayGoals: number;
+    bttsCount: number;
+    over25Count: number;
+  };
+  h2hCount: number;
+}): BettingInsights {
+  const homeName = homeTeam?.name || "Home";
+  const awayName = awayTeam?.name || "Away";
+
+  const homeWinPct = firstNumber(prediction?.home_win_pct);
+  const drawPct = firstNumber(prediction?.draw_pct);
+  const awayWinPct = firstNumber(prediction?.away_win_pct);
+
+  const maxOutcomePct = Math.max(homeWinPct, drawPct, awayWinPct);
+  const secondOutcomePct = [homeWinPct, drawPct, awayWinPct]
+    .sort((a, b) => b - a)[1] || 0;
+  const edgePct = maxOutcomePct - secondOutcomePct;
+
+  const homeStrength = firstNumber(homeSnapshot?.overall_strength_score);
+  const awayStrength = firstNumber(awaySnapshot?.overall_strength_score);
+  const strengthGap = Math.abs(homeStrength - awayStrength);
+
+  const homeFormScore = firstNumber(homeSnapshot?.form_score);
+  const awayFormScore = firstNumber(awaySnapshot?.form_score);
+  const formGap = Math.abs(homeFormScore - awayFormScore);
+
+  const homeAttack = firstNumber(homeSnapshot?.attack_score);
+  const awayAttack = firstNumber(awaySnapshot?.attack_score);
+  const homeDefence = firstNumber(homeSnapshot?.defence_score);
+  const awayDefence = firstNumber(awaySnapshot?.defence_score);
+
+  const homeLast5Pts = firstNumber(homeSnapshot?.last_5_points);
+  const awayLast5Pts = firstNumber(awaySnapshot?.last_5_points);
+
+  const homeBttsRate = percentFromFive(homeSnapshot?.btts_for);
+  const awayBttsRate = percentFromFive(awaySnapshot?.btts_for);
+  const avgBttsRate = Math.round((homeBttsRate + awayBttsRate) / 2);
+
+  const homeOverRate = percentFromFive(homeSnapshot?.over_25_for);
+  const awayOverRate = percentFromFive(awaySnapshot?.over_25_for);
+  const avgOverRate = Math.round((homeOverRate + awayOverRate) / 2);
+
+  const homeFailedToScore = firstNumber(homeSnapshot?.failed_to_score);
+  const awayFailedToScore = firstNumber(awaySnapshot?.failed_to_score);
+  const homeCleanSheets = firstNumber(homeSnapshot?.clean_sheets);
+  const awayCleanSheets = firstNumber(awaySnapshot?.clean_sheets);
+
+  const predictedGoalsTotal =
+    firstNumber(prediction?.predicted_home_goals) +
+    firstNumber(prediction?.predicted_away_goals);
+
+  const homeForm = summariseForm(homeRecent, homeTeam?.id || "");
+  const awayForm = summariseForm(awayRecent, awayTeam?.id || "");
+  const homeVenue = summariseForm(homeHomeRecent, homeTeam?.id || "");
+  const awayVenue = summariseForm(awayAwayRecent, awayTeam?.id || "");
+
+  const homeVenuePoints = homeVenue.wins * 3 + homeVenue.draws;
+  const awayVenuePoints = awayVenue.wins * 3 + awayVenue.draws;
+
+  const homeNonLosePct = clamp(homeWinPct + drawPct);
+  const awayNonLosePct = clamp(awayWinPct + drawPct);
+
+  const rankGap = Math.abs(
+    firstNumber(homeStanding?.position) - firstNumber(awayStanding?.position)
+  );
+
+  let bestResult: BettingInsightItem;
+
+  if (homeWinPct >= 52 && edgePct >= 10 && homeStrength >= awayStrength) {
+    bestResult = {
+      label: "Best result angle",
+      value: homeWinPct >= 60 ? `${homeName} win` : "Home win",
+      tone: "blue",
+      reason: `${homeName} lead the model ${homeWinPct.toFixed(
+        1
+      )}% to win, with stronger overall and form numbers backing the home side.`,
+    };
+  } else if (awayWinPct >= 52 && edgePct >= 10 && awayStrength >= homeStrength) {
+    bestResult = {
+      label: "Best result angle",
+      value: awayWinPct >= 60 ? `${awayName} win` : "Away win",
+      tone: "teal",
+      reason: `${awayName} lead the model ${awayWinPct.toFixed(
+        1
+      )}% to win and rate stronger on the main snapshot indicators.`,
+    };
+  } else if (homeNonLosePct >= 68 && homeStrength >= awayStrength) {
+    bestResult = {
+      label: "Best result angle",
+      value: `${homeName} or Draw`,
+      tone: "blue",
+      reason: `The safer angle is ${homeName} or Draw, with a ${homeNonLosePct.toFixed(
+        1
+      )}% home-side non-loss probability and better home-side profile.`,
+    };
+  } else if (awayNonLosePct >= 68 && awayStrength >= homeStrength) {
+    bestResult = {
+      label: "Best result angle",
+      value: `${awayName} or Draw`,
+      tone: "teal",
+      reason: `The safer angle is ${awayName} or Draw, with a ${awayNonLosePct.toFixed(
+        1
+      )}% away-side non-loss probability and stronger away-side numbers.`,
+    };
+  } else if (drawPct >= 30 && strengthGap <= 6 && formGap <= 6) {
+    bestResult = {
+      label: "Best result angle",
+      value: "Draw lean",
+      tone: "amber",
+      reason: `The matchup looks tight: draw probability is ${drawPct.toFixed(
+        1
+      )}% and the strength/form gaps are narrow.`,
+    };
+  } else if (homeStrength >= awayStrength) {
+    bestResult = {
+      label: "Best result angle",
+      value: `${homeName} or Draw`,
+      tone: "blue",
+      reason: `${homeName} hold a slight edge on strength, form, and venue profile, but not enough for a strong straight win call.`,
+    };
+  } else {
+    bestResult = {
+      label: "Best result angle",
+      value: `${awayName} or Draw`,
+      tone: "teal",
+      reason: `${awayName} hold a slight edge on the snapshot profile, but the safest route is the away-side double chance.`,
+    };
+  }
+
+  let bttsYesScore = 0;
+  let bttsNoScore = 0;
+
+  if (homeBttsRate >= 60) bttsYesScore += 2;
+  if (awayBttsRate >= 60) bttsYesScore += 2;
+  if (avgBttsRate >= 70) bttsYesScore += 2;
+  if (predictedGoalsTotal >= 2.4) bttsYesScore += 1;
+  if (homeAttack >= 55) bttsYesScore += 1;
+  if (awayAttack >= 55) bttsYesScore += 1;
+  if (h2hCount > 0 && h2hSummary.bttsCount / h2hCount >= 0.6) bttsYesScore += 1;
+
+  if (homeFailedToScore >= 2) bttsNoScore += 2;
+  if (awayFailedToScore >= 2) bttsNoScore += 2;
+  if (homeCleanSheets >= 2) bttsNoScore += 1;
+  if (awayCleanSheets >= 2) bttsNoScore += 1;
+  if (predictedGoalsTotal <= 2.1) bttsNoScore += 1;
+  if (homeDefence >= 60) bttsNoScore += 1;
+  if (awayDefence >= 60) bttsNoScore += 1;
+  if (avgBttsRate <= 40) bttsNoScore += 2;
+
+  let btts: BettingInsightItem;
+  if (bttsYesScore >= bttsNoScore) {
+    btts = {
+      label: "BTTS lean",
+      value: "Yes",
+      tone: "teal",
+      reason: `BTTS leans Yes: recent BTTS rates are ${homeBttsRate}% for ${homeName} and ${awayBttsRate}% for ${awayName}, with attacking indicators supporting goals at both ends.`,
+    };
+  } else {
+    btts = {
+      label: "BTTS lean",
+      value: "No",
+      tone: "amber",
+      reason: `BTTS leans No: one or both sides show failed-to-score or clean-sheet trends, which weakens the case for both teams finding the net.`,
+    };
+  }
+
+  let overScore = 0;
+  let underScore = 0;
+
+  if (avgOverRate >= 60) overScore += 2;
+  if (predictedGoalsTotal >= 2.7) overScore += 2;
+  if (homeAttack >= 58) overScore += 1;
+  if (awayAttack >= 58) overScore += 1;
+  if (homeForm.goalsFor + awayForm.goalsFor >= 12) overScore += 1;
+  if (h2hCount > 0 && h2hSummary.over25Count / h2hCount >= 0.6) overScore += 1;
+
+  if (avgOverRate <= 40) underScore += 2;
+  if (predictedGoalsTotal <= 2.2) underScore += 2;
+  if (homeDefence >= 60) underScore += 1;
+  if (awayDefence >= 60) underScore += 1;
+  if (homeCleanSheets + awayCleanSheets >= 4) underScore += 1;
+  if (homeForm.goalsAgainst + awayForm.goalsAgainst <= 8) underScore += 1;
+
+  let goals: BettingInsightItem;
+  if (overScore >= underScore) {
+    goals = {
+      label: "Over/Under 2.5",
+      value: "Over 2.5 lean",
+      tone: "teal",
+      reason: `Over 2.5 is favoured: recent over rates are ${homeOverRate}% and ${awayOverRate}%, and the projected total sits at ${predictedGoalsTotal.toFixed(
+        1
+      )} goals.`,
+    };
+  } else {
+    goals = {
+      label: "Over/Under 2.5",
+      value: "Under 2.5 lean",
+      tone: "amber",
+      reason: `Under 2.5 is favoured: lower goal trends, stronger defensive signals, and a modest projected total all point toward a tighter game.`,
+    };
+  }
+
+  let alignmentScore = 0;
+  if (
+    bestResult.value.toLowerCase().includes(homeName.toLowerCase()) &&
+    homeStrength >= awayStrength
+  ) {
+    alignmentScore += 1;
+  }
+  if (
+    bestResult.value.toLowerCase().includes(awayName.toLowerCase()) &&
+    awayStrength >= homeStrength
+  ) {
+    alignmentScore += 1;
+  }
+  if (btts.value === "Yes" && goals.value === "Over 2.5 lean") alignmentScore += 1;
+  if (btts.value === "No" && goals.value === "Under 2.5 lean") alignmentScore += 1;
+  if (edgePct >= 8) alignmentScore += 1;
+  if (strengthGap >= 8) alignmentScore += 1;
+  if (rankGap >= 5) alignmentScore += 1;
+  if (Math.abs(homeLast5Pts - awayLast5Pts) >= 4) alignmentScore += 1;
+  if (Math.abs(homeVenuePoints - awayVenuePoints) >= 4) alignmentScore += 1;
+
+  const rawConfidenceScore =
+    firstNumber(prediction?.confidence_score) ||
+    (prediction?.confidence_label === "High"
+      ? 78
+      : prediction?.confidence_label === "Low"
+        ? 46
+        : 62);
+
+  const combinedConfidence = clamp(
+    rawConfidenceScore + alignmentScore * 4 - (drawPct >= 30 ? 4 : 0)
+  );
+
+  let confidence: BettingInsightItem;
+  if (combinedConfidence >= 74) {
+    confidence = {
+      label: "Confidence level",
+      value: "High",
+      tone: "teal",
+      reason: `Several signals align here: model edge, team profile, and recent trends are pointing in the same direction.`,
+    };
+  } else if (combinedConfidence >= 58) {
+    confidence = {
+      label: "Confidence level",
+      value: "Medium",
+      tone: "amber",
+      reason: `There is a workable edge, but not every angle is fully aligned, so this sits in the middle band.`,
+    };
+  } else {
+    confidence = {
+      label: "Confidence level",
+      value: "Low",
+      tone: "red",
+      reason: `The matchup looks noisy: smaller probability edge, tighter team profiles, or mixed trend signals reduce conviction.`,
+    };
+  }
+
+  let risk: BettingInsightItem;
+  if (combinedConfidence >= 74 && edgePct >= 8 && drawPct < 30) {
+    risk = {
+      label: "Risk level",
+      value: "Low",
+      tone: "teal",
+      reason: `Lower risk than average because the main numbers are aligned and the match does not look especially volatile.`,
+    };
+  } else if (combinedConfidence >= 58) {
+    risk = {
+      label: "Risk level",
+      value: "Medium",
+      tone: "amber",
+      reason: `There is still enough uncertainty around outcome or goal pattern to keep risk in the medium band.`,
+    };
+  } else {
+    risk = {
+      label: "Risk level",
+      value: "High",
+      tone: "red",
+      reason: `Risk is elevated because the edge is thin, the game projects tighter, or the trends conflict with each other.`,
+    };
+  }
+
+  const summary: string[] = [];
+
+  if (bestResult.value.includes("Draw")) {
+    summary.push(
+      `Result angle is being kept safer because the outcome probabilities are relatively tight.`
+    );
+  } else {
+    summary.push(
+      `${bestResult.value} stands out as the clearest result angle from the current model and snapshot data.`
+    );
+  }
+
+  if (btts.value === "Yes") {
+    summary.push(
+      `BTTS support comes mainly from recent BTTS hit rates and enough attacking output on both sides.`
+    );
+  } else {
+    summary.push(
+      `BTTS is being opposed because one or both teams show failed-to-score or clean-sheet tendencies.`
+    );
+  }
+
+  if (goals.value === "Over 2.5 lean") {
+    summary.push(
+      `The goals lean is positive because recent over trends and the projected goal total both point upward.`
+    );
+  } else {
+    summary.push(
+      `The goals lean stays conservative because defensive signals and lower-scoring trends are still in play.`
+    );
+  }
+
+  return {
+    bestResult,
+    btts,
+    goals,
+    confidence,
+    risk,
+    summary,
+  };
 }
 
 async function getFixtureById(supabase: any, id: string) {
@@ -596,7 +1012,8 @@ async function getRecentVenueFixtures(
     .order("utc_date", { ascending: false })
     .limit(MAX_RECENT);
 
-  query = venue === "home" ? query.eq("home_team_id", teamId) : query.eq("away_team_id", teamId);
+  query =
+    venue === "home" ? query.eq("home_team_id", teamId) : query.eq("away_team_id", teamId);
 
   if (leagueCode) query = query.eq("league_code", leagueCode);
   if (season) query = query.eq("season", season);
@@ -987,22 +1404,56 @@ function TableContextCard({
           gap: "12px",
         }}
       >
-        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
+        <div
+          style={{
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+            borderRadius: "16px",
+            padding: "12px",
+          }}
+        >
           <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Rank</div>
           <div style={{ fontSize: "22px", fontWeight: 800 }}>{standing?.position ?? "-"}</div>
         </div>
 
-        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
+        <div
+          style={{
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+            borderRadius: "16px",
+            padding: "12px",
+          }}
+        >
           <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Points</div>
-          <div style={{ fontSize: "22px", fontWeight: 800 }}>{standing?.points ?? snapshot?.points ?? "-"}</div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>
+            {standing?.points ?? snapshot?.points ?? "-"}
+          </div>
         </div>
 
-        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
-          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Goal diff</div>
-          <div style={{ fontSize: "22px", fontWeight: 800 }}>{formatSigned(standing?.goal_difference ?? snapshot?.goal_difference)}</div>
+        <div
+          style={{
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+            borderRadius: "16px",
+            padding: "12px",
+          }}
+        >
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+            Goal diff
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>
+            {formatSigned(standing?.goal_difference ?? snapshot?.goal_difference)}
+          </div>
         </div>
 
-        <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "12px" }}>
+        <div
+          style={{
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+            borderRadius: "16px",
+            padding: "12px",
+          }}
+        >
           <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Played</div>
           <div style={{ fontSize: "22px", fontWeight: 800 }}>{standing?.played_games ?? "-"}</div>
         </div>
@@ -1017,11 +1468,15 @@ function TableContextCard({
           padding: "12px",
         }}
       >
-        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Season record</div>
+        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+          Season record
+        </div>
         <div style={{ fontSize: "22px", fontWeight: 800 }}>
           {snapshot ? `${snapshot.wins ?? 0}-${snapshot.draws ?? 0}-${snapshot.losses ?? 0}` : "-"}
         </div>
-        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "4px" }}>Wins • draws • losses</div>
+        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "4px" }}>
+          Wins • draws • losses
+        </div>
       </div>
     </div>
   );
@@ -1133,6 +1588,63 @@ function FixtureList({
   );
 }
 
+function BettingInsightCard({ item }: { item: BettingInsightItem }) {
+  const tone = insightToneStyles(item.tone);
+
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        borderRadius: "20px",
+        border: "1px solid #e5e7eb",
+        boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "10px 14px",
+          background: tone.bg,
+          borderBottom: `1px solid ${tone.border}`,
+        }}
+      >
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            fontSize: "12px",
+            fontWeight: 800,
+            color: tone.text,
+          }}
+        >
+          <span>{item.label}</span>
+        </div>
+      </div>
+
+      <div style={{ padding: "18px" }}>
+        <div
+          style={{
+            display: "inline-block",
+            borderRadius: "999px",
+            padding: "7px 12px",
+            background: tone.soft,
+            color: tone.text,
+            border: `1px solid ${tone.border}`,
+            fontSize: "12px",
+            fontWeight: 800,
+            marginBottom: "12px",
+          }}
+        >
+          {item.value}
+        </div>
+
+        <div style={{ fontSize: "14px", lineHeight: 1.65, color: "#334155" }}>{item.reason}</div>
+      </div>
+    </div>
+  );
+}
+
 export default async function MatchDetailsPage({ params }: PageProps) {
   const { id } = await params;
 
@@ -1233,6 +1745,22 @@ export default async function MatchDetailsPage({ params }: PageProps) {
     awayTeam,
     homeSnapshot,
     awaySnapshot,
+    homeRecent,
+    awayRecent,
+    homeHomeRecent,
+    awayAwayRecent,
+    h2hSummary,
+    h2hCount: h2h.length,
+  });
+
+  const bettingInsights = buildBettingInsights({
+    prediction,
+    homeTeam,
+    awayTeam,
+    homeSnapshot,
+    awaySnapshot,
+    homeStanding,
+    awayStanding,
     homeRecent,
     awayRecent,
     homeHomeRecent,
@@ -1387,6 +1915,119 @@ export default async function MatchDetailsPage({ params }: PageProps) {
             </div>
 
             <TeamBadge team={awayTeam} subtitle="Away side" />
+          </div>
+        </section>
+
+        <section
+          style={{
+            background: "#ffffff",
+            borderRadius: "24px",
+            padding: "22px",
+            border: "1px solid #e5e7eb",
+            boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            marginBottom: "28px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "16px",
+              alignItems: "flex-start",
+              flexWrap: "wrap",
+              marginBottom: "18px",
+            }}
+          >
+            <div>
+              <h2 style={{ marginTop: 0, marginBottom: "6px", fontSize: "24px" }}>
+                Betting Insights Panel
+              </h2>
+              <div style={{ fontSize: "13px", color: "#6b7280" }}>
+                Rule-based betting angles built from predictions, snapshot trends, venue form, and
+                head-to-head data
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                borderRadius: "999px",
+                padding: "8px 12px",
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                color: "#1d4ed8",
+                fontSize: "12px",
+                fontWeight: 800,
+              }}
+            >
+              Betting Insights v1
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: "16px",
+              marginBottom: "18px",
+            }}
+          >
+            <BettingInsightCard item={bettingInsights.bestResult} />
+            <BettingInsightCard item={bettingInsights.btts} />
+            <BettingInsightCard item={bettingInsights.goals} />
+            <BettingInsightCard item={bettingInsights.confidence} />
+            <BettingInsightCard item={bettingInsights.risk} />
+          </div>
+
+          <div
+            style={{
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "20px",
+              padding: "18px",
+            }}
+          >
+            <div style={{ fontSize: "16px", fontWeight: 800, marginBottom: "12px" }}>
+              Short reasoning
+            </div>
+
+            <div style={{ display: "grid", gap: "10px" }}>
+              {bettingInsights.summary.map((point, index) => (
+                <div
+                  key={`${index}-${point}`}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "28px 1fr",
+                    gap: "12px",
+                    alignItems: "start",
+                    background: "#ffffff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "16px",
+                    padding: "12px 14px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "999px",
+                      background: "#dbeafe",
+                      color: "#1d4ed8",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {index + 1}
+                  </div>
+                  <div style={{ fontSize: "14px", lineHeight: 1.6, color: "#334155" }}>{point}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -1693,7 +2334,10 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                           <div
                             style={{
                               height: "100%",
-                              width: `${Math.max(0, Math.min(100, Number(item.value || 0)))}%`,
+                              width: `${Math.max(
+                                0,
+                                Math.min(100, Number(item.value || 0))
+                              )}%`,
                               background: item.color,
                             }}
                           />
@@ -1734,7 +2378,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                 Why this prediction
               </h2>
               <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "18px" }}>
-                Rule-based explanation using team strength, recent form, venue splits, and head-to-head trends
+                Rule-based explanation using team strength, recent form, venue splits, and
+                head-to-head trends
               </div>
 
               <div style={{ display: "grid", gap: "12px" }}>
@@ -1806,23 +2451,11 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                 marginBottom: "18px",
               }}
             >
-              <StatCard
-                label={`${homeTeam?.name || "Home"} wins`}
-                value={h2hSummary.homeWins}
-              />
+              <StatCard label={`${homeTeam?.name || "Home"} wins`} value={h2hSummary.homeWins} />
               <StatCard label="Draws" value={h2hSummary.draws} />
-              <StatCard
-                label={`${awayTeam?.name || "Away"} wins`}
-                value={h2hSummary.awayWins}
-              />
-              <StatCard
-                label={`${homeTeam?.name || "Home"} goals`}
-                value={h2hSummary.homeGoals}
-              />
-              <StatCard
-                label={`${awayTeam?.name || "Away"} goals`}
-                value={h2hSummary.awayGoals}
-              />
+              <StatCard label={`${awayTeam?.name || "Away"} wins`} value={h2hSummary.awayWins} />
+              <StatCard label={`${homeTeam?.name || "Home"} goals`} value={h2hSummary.homeGoals} />
+              <StatCard label={`${awayTeam?.name || "Away"} goals`} value={h2hSummary.awayGoals} />
               <StatCard label="BTTS" value={`${h2hSummary.bttsCount}/${h2h.length}`} />
             </div>
 
