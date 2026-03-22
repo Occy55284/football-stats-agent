@@ -1,675 +1,704 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type TeamRef = {
-  name?: string | null;
+type PageProps = {
+  params: Promise<{ id: string }>;
+};
+
+type TeamRow = {
+  id: string;
+  name: string | null;
+  logo: string | null;
 };
 
 type FixtureRow = {
   id: string;
-  utc_date: string | null;
-  status: string | null;
-  home_score: number | null;
-  away_score: number | null;
-  home_team_id: string | null;
-  away_team_id: string | null;
-  home?: TeamRef | TeamRef[] | null;
-  away?: TeamRef | TeamRef[] | null;
+  fixture_api_id?: number | null;
+  league_code?: string | null;
+  season?: number | null;
+  status_short?: string | null;
+  status_long?: string | null;
+  match_date?: string | null;
+  venue_name?: string | null;
+  home_team_id?: string | null;
+  away_team_id?: string | null;
+  home_goals?: number | null;
+  away_goals?: number | null;
 };
 
 type PredictionRow = {
-  fixture_id: string | null;
-  predicted_home_goals: number | null;
-  predicted_away_goals: number | null;
-  predicted_result: string | null;
-  confidence: string | null;
-  confidence_label: string | null;
-  confidence_score: number | null;
-  home_win_pct: number | null;
-  draw_pct: number | null;
-  away_win_pct: number | null;
-  explanation: string | null;
-  model_version: string | null;
-  input_snapshot?: any;
+  id: string;
+  fixture_id: string;
+  predicted_outcome?: string | null;
+  confidence?: number | null;
+  predicted_home_goals?: number | null;
+  predicted_away_goals?: number | null;
+  home_win_pct?: number | null;
+  draw_pct?: number | null;
+  away_win_pct?: number | null;
+  advice?: string | null;
 };
 
-type SnapshotRow = {
-  team_id: string;
-  points: number | null;
-  points_per_game: number | null;
-  last_5_points: number | null;
-  attack_score: number | null;
-  defence_score: number | null;
-  overall_strength_score: number | null;
-  home_points_per_game?: number | null;
-  away_points_per_game?: number | null;
-  clean_sheets?: number | null;
-  failed_to_score?: number | null;
-  btts_for?: number | null;
-  over_25_for?: number | null;
-  team?: TeamRef | TeamRef[] | null;
-};
+const FINISHED_STATUSES = ["FT", "AET", "PEN"];
+const MAX_RECENT = 5;
+const MAX_H2H = 5;
 
-function firstTeamName(input?: TeamRef | TeamRef[] | null, fallback = "-") {
-  if (!input) return fallback;
-  if (Array.isArray(input)) return input[0]?.name || fallback;
-  return input.name || fallback;
+function formatDateTime(value?: string | null) {
+  if (!value) return "TBC";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("en-GB", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatDate(value?: string | null) {
   if (!value) return "TBC";
-  return new Date(value).toLocaleString("en-GB", {
-    dateStyle: "full",
-    timeStyle: "short",
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
   });
 }
 
-function formatPct(value?: number | null) {
-  if (value == null) return "-";
-  return `${Number(value).toFixed(1)}%`;
+function isFinishedMatch(fixture: FixtureRow) {
+  return !!fixture.status_short && FINISHED_STATUSES.includes(fixture.status_short);
 }
 
-function formatNum(value?: number | null, decimals = 1) {
-  if (value == null) return "-";
-  return Number(value).toFixed(decimals);
+function getOutcomeForTeam(fixture: FixtureRow, teamId: string) {
+  const isHome = fixture.home_team_id === teamId;
+  const gf = isHome ? fixture.home_goals ?? 0 : fixture.away_goals ?? 0;
+  const ga = isHome ? fixture.away_goals ?? 0 : fixture.home_goals ?? 0;
+
+  if (gf > ga) return "W";
+  if (gf < ga) return "L";
+  return "D";
 }
 
-function resultLabel(value?: string | null) {
-  if (value === "HOME") return "Home win";
-  if (value === "AWAY") return "Away win";
-  if (value === "DRAW") return "Draw";
-  return value || "-";
+function getOutcomeClasses(result: "W" | "D" | "L") {
+  if (result === "W") return "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+  if (result === "L") return "bg-red-500/20 text-red-300 border border-red-500/30";
+  return "bg-amber-500/20 text-amber-300 border border-amber-500/30";
 }
 
-function confidenceTone(value?: string | null) {
-  if (value === "High") {
-    return {
-      bg: "#dcfce7",
-      text: "#166534",
-      border: "#86efac",
-    };
+function getOpponentName(fixture: FixtureRow, teamId: string, teamMap: Record<string, TeamRow>) {
+  const opponentId = fixture.home_team_id === teamId ? fixture.away_team_id : fixture.home_team_id;
+  if (!opponentId) return "Unknown";
+  return teamMap[opponentId]?.name || "Unknown";
+}
+
+function getScorelineFromTeamView(fixture: FixtureRow, teamId: string) {
+  const isHome = fixture.home_team_id === teamId;
+  const gf = isHome ? fixture.home_goals : fixture.away_goals;
+  const ga = isHome ? fixture.away_goals : fixture.home_goals;
+  return `${gf ?? "-"} - ${ga ?? "-"}`;
+}
+
+function summariseForm(fixtures: FixtureRow[], teamId: string) {
+  let wins = 0;
+  let draws = 0;
+  let losses = 0;
+  let goalsFor = 0;
+  let goalsAgainst = 0;
+
+  for (const fixture of fixtures) {
+    const result = getOutcomeForTeam(fixture, teamId);
+    const isHome = fixture.home_team_id === teamId;
+    const gf = isHome ? fixture.home_goals ?? 0 : fixture.away_goals ?? 0;
+    const ga = isHome ? fixture.away_goals ?? 0 : fixture.home_goals ?? 0;
+
+    goalsFor += gf;
+    goalsAgainst += ga;
+
+    if (result === "W") wins += 1;
+    else if (result === "D") draws += 1;
+    else losses += 1;
   }
-  if (value === "Low") {
-    return {
-      bg: "#fee2e2",
-      text: "#991b1b",
-      border: "#fca5a5",
-    };
-  }
-  return {
-    bg: "#fef3c7",
-    text: "#92400e",
-    border: "#fcd34d",
-  };
+
+  return { wins, draws, losses, goalsFor, goalsAgainst };
 }
 
-function edgeLabel(
-  home?: number | null,
-  away?: number | null,
-  homeName = "Home",
-  awayName = "Away"
+async function getFixtureById(supabase: Awaited<ReturnType<typeof createClient>>, id: string) {
+  const { data, error } = await supabase
+    .from("fixtures")
+    .select(
+      `
+      id,
+      fixture_api_id,
+      league_code,
+      season,
+      status_short,
+      status_long,
+      match_date,
+      venue_name,
+      home_team_id,
+      away_team_id,
+      home_goals,
+      away_goals
+    `
+    )
+    .eq("id", id)
+    .single();
+
+  if (error || !data) return null;
+  return data as FixtureRow;
+}
+
+async function getPredictionForFixture(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  fixtureId: string
 ) {
-  const h = Number(home || 0);
-  const a = Number(away || 0);
-  const diff = h - a;
+  const { data } = await supabase
+    .from("predictions")
+    .select(
+      `
+      id,
+      fixture_id,
+      predicted_outcome,
+      confidence,
+      predicted_home_goals,
+      predicted_away_goals,
+      home_win_pct,
+      draw_pct,
+      away_win_pct,
+      advice
+    `
+    )
+    .eq("fixture_id", fixtureId)
+    .maybeSingle();
 
-  if (Math.abs(diff) < 2) return "Even";
-  if (diff > 0) return `${homeName} edge`;
-  return `${awayName} edge`;
+  return (data as PredictionRow | null) || null;
 }
 
-function barWidth(value?: number | null, max = 100) {
-  const pct = Math.max(0, Math.min(100, (Number(value || 0) / max) * 100));
-  return `${pct}%`;
+async function getTeamsMap(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ids: string[]
+): Promise<Record<string, TeamRow>> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (!uniqueIds.length) return {};
+
+  const { data } = await supabase
+    .from("teams")
+    .select("id, name, logo")
+    .in("id", uniqueIds);
+
+  const map: Record<string, TeamRow> = {};
+  for (const team of (data || []) as TeamRow[]) {
+    map[team.id] = team;
+  }
+  return map;
 }
 
-function StatBar({
+async function getRecentTeamFixtures(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  teamId: string,
+  beforeDate: string | null | undefined,
+  leagueCode?: string | null,
+  season?: number | null
+) {
+  let query = supabase
+    .from("fixtures")
+    .select(
+      `
+      id,
+      fixture_api_id,
+      league_code,
+      season,
+      status_short,
+      status_long,
+      match_date,
+      venue_name,
+      home_team_id,
+      away_team_id,
+      home_goals,
+      away_goals
+    `
+    )
+    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+    .in("status_short", FINISHED_STATUSES)
+    .order("match_date", { ascending: false })
+    .limit(MAX_RECENT);
+
+  if (beforeDate) query = query.lt("match_date", beforeDate);
+  if (leagueCode) query = query.eq("league_code", leagueCode);
+  if (season) query = query.eq("season", season);
+
+  const { data } = await query;
+  return (data || []) as FixtureRow[];
+}
+
+async function getHeadToHeadFixtures(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  homeTeamId: string,
+  awayTeamId: string,
+  beforeDate: string | null | undefined,
+  leagueCode?: string | null,
+  season?: number | null
+) {
+  let query = supabase
+    .from("fixtures")
+    .select(
+      `
+      id,
+      fixture_api_id,
+      league_code,
+      season,
+      status_short,
+      status_long,
+      match_date,
+      venue_name,
+      home_team_id,
+      away_team_id,
+      home_goals,
+      away_goals
+    `
+    )
+    .or(
+      `and(home_team_id.eq.${homeTeamId},away_team_id.eq.${awayTeamId}),and(home_team_id.eq.${awayTeamId},away_team_id.eq.${homeTeamId})`
+    )
+    .in("status_short", FINISHED_STATUSES)
+    .order("match_date", { ascending: false })
+    .limit(MAX_H2H);
+
+  if (beforeDate) query = query.lt("match_date", beforeDate);
+  if (leagueCode) query = query.eq("league_code", leagueCode);
+  if (season) query = query.eq("season", season);
+
+  const { data } = await query;
+  return (data || []) as FixtureRow[];
+}
+
+function PercentBar({
   label,
   value,
-  max,
-  color,
-  decimals = 1,
 }: {
   label: string;
   value?: number | null;
-  max: number;
-  color: string;
-  decimals?: number;
 }) {
+  const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
+
   return (
-    <div style={{ marginBottom: "12px" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          fontSize: "12px",
-          marginBottom: "4px",
-        }}
-      >
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-sm text-zinc-300">
         <span>{label}</span>
-        <strong>{formatNum(value, decimals)}</strong>
+        <span>{safeValue}%</span>
       </div>
-      <div
-        style={{
-          height: "8px",
-          background: "#e5e7eb",
-          borderRadius: "999px",
-          overflow: "hidden",
-        }}
-      >
+      <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
         <div
-          style={{
-            width: barWidth(value, max),
-            height: "100%",
-            background: color,
-          }}
+          className="h-2 rounded-full bg-sky-500"
+          style={{ width: `${safeValue}%` }}
         />
       </div>
     </div>
   );
 }
 
-export default async function MatchDetailsPage({
-  params,
+function TeamBadge({
+  team,
+  align = "left",
 }: {
-  params: Promise<{ id: string }>;
+  team?: TeamRow;
+  align?: "left" | "right";
 }) {
-  const { id } = await params;
-
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  return (
+    <div className={`flex items-center gap-3 ${align === "right" ? "justify-end" : ""}`}>
+      {align === "right" ? (
+        <>
+          <div className="text-right">
+            <div className="font-semibold text-white">{team?.name || "Unknown team"}</div>
+          </div>
+          {team?.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={team.logo}
+              alt={team.name || "Team logo"}
+              className="h-10 w-10 rounded-full bg-white object-contain p-1"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-full bg-zinc-800 border border-zinc-700" />
+          )}
+        </>
+      ) : (
+        <>
+          {team?.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={team.logo}
+              alt={team.name || "Team logo"}
+              className="h-10 w-10 rounded-full bg-white object-contain p-1"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-full bg-zinc-800 border border-zinc-700" />
+          )}
+          <div>
+            <div className="font-semibold text-white">{team?.name || "Unknown team"}</div>
+          </div>
+        </>
+      )}
+    </div>
   );
+}
 
-  const { data: fixture, error: fixtureError } = await supabase
-    .from("fixtures")
-    .select(`
-      id,
-      utc_date,
-      status,
-      home_score,
-      away_score,
-      home_team_id,
-      away_team_id,
-      home:home_team_id(name),
-      away:away_team_id(name)
-    `)
-    .eq("id", id)
-    .single();
-
-  if (fixtureError || !fixture) {
-    notFound();
-  }
-
-  const typedFixture = fixture as FixtureRow;
-
-  const { data: prediction } = await supabase
-    .from("predictions")
-    .select(`
-      fixture_id,
-      predicted_home_goals,
-      predicted_away_goals,
-      predicted_result,
-      confidence,
-      confidence_label,
-      confidence_score,
-      home_win_pct,
-      draw_pct,
-      away_win_pct,
-      explanation,
-      model_version,
-      input_snapshot
-    `)
-    .eq("fixture_id", id)
-    .single();
-
-  const teamIds = [typedFixture.home_team_id, typedFixture.away_team_id].filter(
-    Boolean
-  ) as string[];
-
-  const { data: snapshotRows } = await supabase
-    .from("team_stats_snapshot")
-    .select(`
-      team_id,
-      points,
-      points_per_game,
-      last_5_points,
-      attack_score,
-      defence_score,
-      overall_strength_score,
-      home_points_per_game,
-      away_points_per_game,
-      clean_sheets,
-      failed_to_score,
-      btts_for,
-      over_25_for,
-      team:team_id(name)
-    `)
-    .in("team_id", teamIds)
-    .eq("league_code", "PL")
-    .eq("season", 2025);
-
-  const snapshots = (snapshotRows || []) as SnapshotRow[];
-  const predictionRow = (prediction || null) as PredictionRow | null;
-
-  const snapshotMap = new Map<string, SnapshotRow>();
-  for (const row of snapshots) {
-    snapshotMap.set(row.team_id, row);
-  }
-
-  const homeSnapshot = typedFixture.home_team_id
-    ? snapshotMap.get(typedFixture.home_team_id)
-    : undefined;
-  const awaySnapshot = typedFixture.away_team_id
-    ? snapshotMap.get(typedFixture.away_team_id)
-    : undefined;
-
-  const homeName = firstTeamName(typedFixture.home, "Home");
-  const awayName = firstTeamName(typedFixture.away, "Away");
-
-  const confidence = predictionRow?.confidence_label || predictionRow?.confidence || "Medium";
-  const tone = confidenceTone(confidence);
-
-  const strengthEdge = edgeLabel(
-    homeSnapshot?.overall_strength_score,
-    awaySnapshot?.overall_strength_score,
-    homeName,
-    awayName
-  );
-  const attackEdge = edgeLabel(
-    homeSnapshot?.attack_score,
-    awaySnapshot?.attack_score,
-    homeName,
-    awayName
-  );
-  const defenceEdge = edgeLabel(
-    homeSnapshot?.defence_score,
-    awaySnapshot?.defence_score,
-    homeName,
-    awayName
-  );
-  const formEdge = edgeLabel(
-    homeSnapshot?.last_5_points,
-    awaySnapshot?.last_5_points,
-    homeName,
-    awayName
-  );
+function FormList({
+  title,
+  fixtures,
+  teamId,
+  teamMap,
+}: {
+  title: string;
+  fixtures: FixtureRow[];
+  teamId: string;
+  teamMap: Record<string, TeamRow>;
+}) {
+  const summary = summariseForm(fixtures, teamId);
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#f5f7fb",
-        padding: "32px 20px 56px",
-        fontFamily: "Arial, sans-serif",
-        color: "#111827",
-      }}
-    >
-      <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
-        <div style={{ marginBottom: "18px" }}>
+    <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-white">{title}</h2>
+          <p className="text-sm text-zinc-400">Last {fixtures.length} completed matches</p>
+        </div>
+        <div className="text-right text-sm text-zinc-300">
+          <div>
+            W-D-L:{" "}
+            <span className="font-semibold text-white">
+              {summary.wins}-{summary.draws}-{summary.losses}
+            </span>
+          </div>
+          <div>
+            GF-GA:{" "}
+            <span className="font-semibold text-white">
+              {summary.goalsFor}-{summary.goalsAgainst}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {fixtures.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
+            No recent completed matches found.
+          </div>
+        ) : (
+          fixtures.map((fixture) => {
+            const result = getOutcomeForTeam(fixture, teamId);
+            const opponent = getOpponentName(fixture, teamId, teamMap);
+            const score = getScorelineFromTeamView(fixture, teamId);
+            const isHome = fixture.home_team_id === teamId;
+
+            return (
+              <div
+                key={fixture.id}
+                className="flex items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-white truncate">
+                    {isHome ? "vs" : "at"} {opponent}
+                  </div>
+                  <div className="text-xs text-zinc-400">
+                    {formatDate(fixture.match_date)} • {isHome ? "Home" : "Away"}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="text-sm font-semibold text-white">{score}</div>
+                  <span
+                    className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${getOutcomeClasses(
+                      result
+                    )}`}
+                  >
+                    {result}
+                  </span>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
+export default async function MatchDetailsPage({ params }: PageProps) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const fixture = await getFixtureById(supabase, id);
+  if (!fixture) notFound();
+
+  const homeTeamId = fixture.home_team_id;
+  const awayTeamId = fixture.away_team_id;
+
+  if (!homeTeamId || !awayTeamId) notFound();
+
+  const [prediction, homeRecent, awayRecent, h2h, initialTeamMap] = await Promise.all([
+    getPredictionForFixture(supabase, fixture.id),
+    getRecentTeamFixtures(
+      supabase,
+      homeTeamId,
+      fixture.match_date,
+      fixture.league_code,
+      fixture.season
+    ),
+    getRecentTeamFixtures(
+      supabase,
+      awayTeamId,
+      fixture.match_date,
+      fixture.league_code,
+      fixture.season
+    ),
+    getHeadToHeadFixtures(
+      supabase,
+      homeTeamId,
+      awayTeamId,
+      fixture.match_date,
+      fixture.league_code,
+      fixture.season
+    ),
+    getTeamsMap(supabase, [homeTeamId, awayTeamId]),
+  ]);
+
+  const extraTeamIds = [
+    ...homeRecent.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
+    ...awayRecent.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
+    ...h2h.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
+  ].filter(Boolean);
+
+  const extraTeamMap = await getTeamsMap(supabase, extraTeamIds);
+  const teamMap = { ...initialTeamMap, ...extraTeamMap };
+
+  const homeTeam = teamMap[homeTeamId];
+  const awayTeam = teamMap[awayTeamId];
+
+  const homeFormSummary = summariseForm(homeRecent, homeTeamId);
+  const awayFormSummary = summariseForm(awayRecent, awayTeamId);
+
+  return (
+    <main className="min-h-screen bg-black text-white">
+      <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 lg:px-8">
+        <div className="mb-6">
           <Link
             href="/"
-            style={{
-              display: "inline-block",
-              textDecoration: "none",
-              color: "#2563eb",
-              fontWeight: 700,
-            }}
+            className="inline-flex items-center rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
           >
-            ← Back to dashboard
+            ← Back to predictions
           </Link>
         </div>
 
-        <section
-          style={{
-            background: "linear-gradient(135deg, #0f172a 0%, #1e293b 65%, #2563eb 100%)",
-            color: "#ffffff",
-            borderRadius: "28px",
-            padding: "28px",
-            boxShadow: "0 18px 40px rgba(15,23,42,0.18)",
-            marginBottom: "24px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "20px",
-              flexWrap: "wrap",
-              alignItems: "flex-start",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  display: "inline-block",
-                  padding: "6px 10px",
-                  borderRadius: "999px",
-                  background: "rgba(255,255,255,0.14)",
-                  fontSize: "12px",
-                  marginBottom: "12px",
-                }}
-              >
-                Match details
+        <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6 md:p-8">
+          <div className="grid gap-6 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+            <TeamBadge team={homeTeam} />
+
+            <div className="text-center">
+              <div className="text-xs uppercase tracking-[0.2em] text-zinc-400">
+                {fixture.league_code || "League"}{fixture.season ? ` • ${fixture.season}` : ""}
               </div>
 
-              <h1 style={{ margin: "0 0 8px", fontSize: "36px", lineHeight: 1.1 }}>
-                {homeName} v {awayName}
-              </h1>
+              <div className="mt-3 text-3xl font-bold text-white md:text-4xl">
+                {homeTeam?.name || "Home"}{" "}
+                <span className="text-zinc-500">vs</span>{" "}
+                {awayTeam?.name || "Away"}
+              </div>
 
-              <p style={{ margin: 0, color: "#dbeafe", fontSize: "15px" }}>
-                {formatDate(typedFixture.utc_date)}
-              </p>
+              <div className="mt-3 text-sm text-zinc-300">
+                {formatDateTime(fixture.match_date)}
+              </div>
+
+              <div className="mt-1 text-sm text-zinc-500">
+                {fixture.venue_name || "Venue TBC"}
+              </div>
+
+              {isFinishedMatch(fixture) ? (
+                <div className="mt-5 inline-flex items-center gap-3 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3">
+                  <span className="text-xs uppercase tracking-wide text-zinc-400">
+                    Final score
+                  </span>
+                  <span className="text-2xl font-bold text-white">
+                    {fixture.home_goals ?? "-"} - {fixture.away_goals ?? "-"}
+                  </span>
+                </div>
+              ) : (
+                <div className="mt-5 inline-flex items-center gap-2 rounded-2xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-300">
+                  Upcoming match
+                </div>
+              )}
             </div>
 
-            <div
-              style={{
-                background: tone.bg,
-                color: tone.text,
-                border: `1px solid ${tone.border}`,
-                borderRadius: "999px",
-                padding: "10px 14px",
-                fontSize: "13px",
-                fontWeight: 800,
-              }}
-            >
-              {confidence} confidence
-            </div>
+            <TeamBadge team={awayTeam} align="right" />
           </div>
         </section>
 
-        <section
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1.1fr 0.9fr",
-            gap: "24px",
-            alignItems: "start",
-            marginBottom: "24px",
-          }}
-        >
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "24px",
-              padding: "22px",
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
-            }}
-          >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
-              Prediction Summary
-            </h2>
+        <div className="mt-6 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
+            <h2 className="text-lg font-semibold text-white">Recent results snapshot</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Rolling form from each side&apos;s last five completed matches before this fixture.
+            </p>
 
-            {predictionRow ? (
-              <>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "14px",
-                  }}
-                >
-                  <div
-                    style={{
-                      background: "#f9fafb",
-                      borderRadius: "18px",
-                      padding: "16px",
-                      border: "1px solid #e5e7eb",
-                    }}
-                  >
-                    <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "8px" }}>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
+                <div className="text-sm font-semibold text-white">
+                  {homeTeam?.name || "Home team"}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl bg-zinc-900 p-3">
+                    <div className="text-zinc-400">W-D-L</div>
+                    <div className="mt-1 font-semibold text-white">
+                      {homeFormSummary.wins}-{homeFormSummary.draws}-{homeFormSummary.losses}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-zinc-900 p-3">
+                    <div className="text-zinc-400">GF-GA</div>
+                    <div className="mt-1 font-semibold text-white">
+                      {homeFormSummary.goalsFor}-{homeFormSummary.goalsAgainst}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
+                <div className="text-sm font-semibold text-white text-right">
+                  {awayTeam?.name || "Away team"}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl bg-zinc-900 p-3">
+                    <div className="text-zinc-400">W-D-L</div>
+                    <div className="mt-1 font-semibold text-white">
+                      {awayFormSummary.wins}-{awayFormSummary.draws}-{awayFormSummary.losses}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-zinc-900 p-3">
+                    <div className="text-zinc-400">GF-GA</div>
+                    <div className="mt-1 font-semibold text-white">
+                      {awayFormSummary.goalsFor}-{awayFormSummary.goalsAgainst}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
+            <h2 className="text-lg font-semibold text-white">Prediction insight</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Current stored model output for this fixture.
+            </p>
+
+            {!prediction ? (
+              <div className="mt-4 rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
+                No prediction found for this match yet.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                    <div className="text-xs uppercase tracking-wide text-zinc-400">Outcome</div>
+                    <div className="mt-2 text-xl font-semibold text-white">
+                      {prediction.predicted_outcome || "N/A"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                    <div className="text-xs uppercase tracking-wide text-zinc-400">Confidence</div>
+                    <div className="mt-2 text-xl font-semibold text-white">
+                      {prediction.confidence ?? 0}%
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                    <div className="text-xs uppercase tracking-wide text-zinc-400">
                       Predicted score
                     </div>
-                    <div style={{ fontSize: "34px", fontWeight: 900, marginBottom: "8px" }}>
-                      {formatNum(predictionRow.predicted_home_goals, 1)} -{" "}
-                      {formatNum(predictionRow.predicted_away_goals, 1)}
-                    </div>
-                    <div style={{ fontSize: "14px", color: "#374151" }}>
-                      Lean: <strong>{resultLabel(predictionRow.predicted_result)}</strong>
-                    </div>
-                    <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "8px" }}>
-                      Model: <strong>{predictionRow.model_version || "-"}</strong>
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      background: "#f9fafb",
-                      borderRadius: "18px",
-                      padding: "16px",
-                      border: "1px solid #e5e7eb",
-                    }}
-                  >
-                    <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "10px" }}>
-                      Win probabilities
-                    </div>
-
-                    <div style={{ display: "grid", gap: "10px", fontSize: "14px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>{homeName}</span>
-                        <strong>{formatPct(predictionRow.home_win_pct)}</strong>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>Draw</span>
-                        <strong>{formatPct(predictionRow.draw_pct)}</strong>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>{awayName}</span>
-                        <strong>{formatPct(predictionRow.away_win_pct)}</strong>
-                      </div>
+                    <div className="mt-2 text-xl font-semibold text-white">
+                      {prediction.predicted_home_goals ?? "-"} -{" "}
+                      {prediction.predicted_away_goals ?? "-"}
                     </div>
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "10px",
-                    flexWrap: "wrap",
-                    marginTop: "14px",
-                  }}
-                >
-                  {[strengthEdge, attackEdge, defenceEdge, formEdge].map((badge) => (
+                <div className="space-y-3 rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                  <PercentBar label={`${homeTeam?.name || "Home"} win`} value={prediction.home_win_pct} />
+                  <PercentBar label="Draw" value={prediction.draw_pct} />
+                  <PercentBar label={`${awayTeam?.name || "Away"} win`} value={prediction.away_win_pct} />
+                </div>
+
+                {prediction.advice ? (
+                  <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-4 text-sm text-sky-100">
+                    <span className="font-semibold">Advice:</span> {prediction.advice}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="mt-6 grid gap-6 xl:grid-cols-3">
+          <div className="xl:col-span-1">
+            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 h-full">
+              <h2 className="text-lg font-semibold text-white">Head-to-head</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Last {MAX_H2H} completed meetings before this fixture.
+              </p>
+
+              <div className="mt-4 space-y-3">
+                {h2h.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
+                    No completed head-to-head matches found.
+                  </div>
+                ) : (
+                  h2h.map((game) => (
                     <div
-                      key={badge}
-                      style={{
-                        background: "#eff6ff",
-                        color: "#1d4ed8",
-                        border: "1px solid #bfdbfe",
-                        borderRadius: "999px",
-                        padding: "7px 10px",
-                        fontSize: "12px",
-                        fontWeight: 700,
-                      }}
+                      key={game.id}
+                      className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
                     >
-                      {badge}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-white truncate">
+                            {teamMap[game.home_team_id || ""]?.name || "Home"} vs{" "}
+                            {teamMap[game.away_team_id || ""]?.name || "Away"}
+                          </div>
+                          <div className="text-xs text-zinc-400">
+                            {formatDate(game.match_date)}
+                          </div>
+                        </div>
+                        <div className="text-sm font-semibold text-white">
+                          {game.home_goals ?? "-"} - {game.away_goals ?? "-"}
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: "16px",
-                    fontSize: "14px",
-                    color: "#374151",
-                    lineHeight: 1.6,
-                    background: "#f9fafb",
-                    borderRadius: "18px",
-                    padding: "16px",
-                    border: "1px solid #e5e7eb",
-                  }}
-                >
-                  {predictionRow.explanation || "No explanation available yet."}
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "#6b7280" }}>No prediction found for this fixture yet.</div>
-            )}
+                  ))
+                )}
+              </div>
+            </section>
           </div>
 
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "24px",
-              padding: "22px",
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
-            }}
-          >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
-              Match Info
-            </h2>
-
-            <div style={{ display: "grid", gap: "12px", fontSize: "14px" }}>
-              <div
-                style={{
-                  background: "#f9fafb",
-                  borderRadius: "16px",
-                  padding: "14px",
-                  border: "1px solid #e5e7eb",
-                }}
-              >
-                <div style={{ color: "#6b7280", marginBottom: "4px" }}>Fixture</div>
-                <div style={{ fontWeight: 800 }}>
-                  {homeName} v {awayName}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  background: "#f9fafb",
-                  borderRadius: "16px",
-                  padding: "14px",
-                  border: "1px solid #e5e7eb",
-                }}
-              >
-                <div style={{ color: "#6b7280", marginBottom: "4px" }}>Kick-off</div>
-                <div style={{ fontWeight: 800 }}>{formatDate(typedFixture.utc_date)}</div>
-              </div>
-
-              <div
-                style={{
-                  background: "#f9fafb",
-                  borderRadius: "16px",
-                  padding: "14px",
-                  border: "1px solid #e5e7eb",
-                }}
-              >
-                <div style={{ color: "#6b7280", marginBottom: "4px" }}>Status</div>
-                <div style={{ fontWeight: 800 }}>{typedFixture.status || "-"}</div>
-              </div>
-
-              <div
-                style={{
-                  background: "#f9fafb",
-                  borderRadius: "16px",
-                  padding: "14px",
-                  border: "1px solid #e5e7eb",
-                }}
-              >
-                <div style={{ color: "#6b7280", marginBottom: "4px" }}>Actual score</div>
-                <div style={{ fontWeight: 800 }}>
-                  {typedFixture.home_score ?? "-"} - {typedFixture.away_score ?? "-"}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "24px",
-          }}
-        >
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "24px",
-              padding: "22px",
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
-            }}
-          >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
-              {homeName} Snapshot
-            </h2>
-
-            {homeSnapshot ? (
-              <>
-                <StatBar label="Overall strength" value={homeSnapshot.overall_strength_score} max={100} color="#2563eb" />
-                <StatBar label="Attack score" value={homeSnapshot.attack_score} max={200} color="#2563eb" />
-                <StatBar label="Defence score" value={homeSnapshot.defence_score} max={200} color="#2563eb" />
-                <StatBar label="Last 5 points" value={homeSnapshot.last_5_points} max={15} color="#2563eb" decimals={0} />
-
-                <div
-                  style={{
-                    marginTop: "14px",
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: "10px",
-                    fontSize: "14px",
-                  }}
-                >
-                  <div>PPG: <strong>{formatNum(homeSnapshot.points_per_game, 2)}</strong></div>
-                  <div>Home PPG: <strong>{formatNum(homeSnapshot.home_points_per_game, 2)}</strong></div>
-                  <div>Clean sheets: <strong>{formatNum(homeSnapshot.clean_sheets, 0)}</strong></div>
-                  <div>Failed to score: <strong>{formatNum(homeSnapshot.failed_to_score, 0)}</strong></div>
-                  <div>BTTS: <strong>{formatNum(homeSnapshot.btts_for, 0)}</strong></div>
-                  <div>Over 2.5: <strong>{formatNum(homeSnapshot.over_25_for, 0)}</strong></div>
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "#6b7280" }}>No snapshot found.</div>
-            )}
+          <div className="xl:col-span-1">
+            <FormList
+              title={`${homeTeam?.name || "Home team"} last 5`}
+              fixtures={homeRecent}
+              teamId={homeTeamId}
+              teamMap={teamMap}
+            />
           </div>
 
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "24px",
-              padding: "22px",
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
-            }}
-          >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
-              {awayName} Snapshot
-            </h2>
-
-            {awaySnapshot ? (
-              <>
-                <StatBar label="Overall strength" value={awaySnapshot.overall_strength_score} max={100} color="#111827" />
-                <StatBar label="Attack score" value={awaySnapshot.attack_score} max={200} color="#111827" />
-                <StatBar label="Defence score" value={awaySnapshot.defence_score} max={200} color="#111827" />
-                <StatBar label="Last 5 points" value={awaySnapshot.last_5_points} max={15} color="#111827" decimals={0} />
-
-                <div
-                  style={{
-                    marginTop: "14px",
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: "10px",
-                    fontSize: "14px",
-                  }}
-                >
-                  <div>PPG: <strong>{formatNum(awaySnapshot.points_per_game, 2)}</strong></div>
-                  <div>Away PPG: <strong>{formatNum(awaySnapshot.away_points_per_game, 2)}</strong></div>
-                  <div>Clean sheets: <strong>{formatNum(awaySnapshot.clean_sheets, 0)}</strong></div>
-                  <div>Failed to score: <strong>{formatNum(awaySnapshot.failed_to_score, 0)}</strong></div>
-                  <div>BTTS: <strong>{formatNum(awaySnapshot.btts_for, 0)}</strong></div>
-                  <div>Over 2.5: <strong>{formatNum(awaySnapshot.over_25_for, 0)}</strong></div>
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "#6b7280" }}>No snapshot found.</div>
-            )}
+          <div className="xl:col-span-1">
+            <FormList
+              title={`${awayTeam?.name || "Away team"} last 5`}
+              fixtures={awayRecent}
+              teamId={awayTeamId}
+              teamMap={teamMap}
+            />
           </div>
-        </section>
+        </div>
       </div>
     </main>
   );
