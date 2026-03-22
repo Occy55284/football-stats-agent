@@ -3,6 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+type PageProps = {
+  searchParams?: Promise<{
+    slip?: string | string[] | undefined;
+  }>;
+};
+
 type TeamRef = {
   name?: string | null;
 };
@@ -81,6 +87,18 @@ type PickOfTheDay = {
   bullets: string[];
 };
 
+type SlipSelection = {
+  fixtureId: string;
+  homeName: string;
+  awayName: string;
+  angle: string;
+  confidenceLabel: string;
+  riskLabel: string;
+  score: number;
+  shortReason: string;
+  prediction: PredictionRow;
+};
+
 function firstTeamName(input?: TeamRef | TeamRef[] | null, fallback = "-") {
   if (!input) return fallback;
   if (Array.isArray(input)) return input[0]?.name || fallback;
@@ -110,6 +128,10 @@ function resultLabel(value?: string | null) {
   if (value === "AWAY") return "Away win";
   if (value === "DRAW") return "Draw";
   return value || "-";
+}
+
+function numberValue(value?: number | null) {
+  return Number(value || 0);
 }
 
 function confidenceTone(value?: string | null) {
@@ -176,10 +198,6 @@ function metricBarWidth(value?: number | null, max = 100) {
   return `${pct}%`;
 }
 
-function numberValue(value?: number | null) {
-  return Number(value || 0);
-}
-
 function buildPickAngle(
   prediction: PredictionRow,
   homeName: string,
@@ -190,6 +208,7 @@ function buildPickAngle(
   const homeWin = numberValue(prediction.home_win_pct);
   const draw = numberValue(prediction.draw_pct);
   const awayWin = numberValue(prediction.away_win_pct);
+
   const homeNonLose = homeWin + draw;
   const awayNonLose = awayWin + draw;
 
@@ -212,6 +231,100 @@ function buildPickAngle(
   return "Tight match";
 }
 
+function buildSelectionFromPrediction(
+  prediction: PredictionRow,
+  snapshotMap: Map<string, SnapshotRow>
+): SlipSelection | null {
+  if (!prediction.fixture_id) return null;
+
+  const homeName = firstTeamName(prediction.fixture?.home, "Home");
+  const awayName = firstTeamName(prediction.fixture?.away, "Away");
+
+  const homeId = prediction.home_team_id || prediction.fixture?.home_team_id || null;
+  const awayId = prediction.away_team_id || prediction.fixture?.away_team_id || null;
+
+  const homeSnapshot = homeId ? snapshotMap.get(homeId) : undefined;
+  const awaySnapshot = awayId ? snapshotMap.get(awayId) : undefined;
+
+  const homeWin = numberValue(prediction.home_win_pct);
+  const draw = numberValue(prediction.draw_pct);
+  const awayWin = numberValue(prediction.away_win_pct);
+
+  const biggestOutcome = Math.max(homeWin, draw, awayWin);
+  const secondOutcome = [homeWin, draw, awayWin].sort((a, b) => b - a)[1] || 0;
+  const probabilityEdge = biggestOutcome - secondOutcome;
+
+  const confidenceBase =
+    numberValue(prediction.confidence_score) ||
+    (prediction.confidence_label === "High" || prediction.confidence === "High"
+      ? 76
+      : prediction.confidence_label === "Low" || prediction.confidence === "Low"
+        ? 46
+        : 61);
+
+  const homeStrength = numberValue(homeSnapshot?.overall_strength_score);
+  const awayStrength = numberValue(awaySnapshot?.overall_strength_score);
+  const strengthGap = Math.abs(homeStrength - awayStrength);
+
+  const homeForm = numberValue(homeSnapshot?.last_5_points);
+  const awayForm = numberValue(awaySnapshot?.last_5_points);
+  const formGap = Math.abs(homeForm - awayForm);
+
+  const homeAttack = numberValue(homeSnapshot?.attack_score);
+  const awayAttack = numberValue(awaySnapshot?.attack_score);
+  const attackGap = Math.abs(homeAttack - awayAttack);
+
+  const homeHomePPG = numberValue(homeSnapshot?.home_points_per_game);
+  const awayAwayPPG = numberValue(awaySnapshot?.away_points_per_game);
+  const venueGap = Math.abs(homeHomePPG - awayAwayPPG);
+
+  const predictedTotalGoals =
+    numberValue(prediction.predicted_home_goals) + numberValue(prediction.predicted_away_goals);
+
+  const homeOver = numberValue(homeSnapshot?.over_25_for);
+  const awayOver = numberValue(awaySnapshot?.over_25_for);
+  const homeBtts = numberValue(homeSnapshot?.btts_for);
+  const awayBtts = numberValue(awaySnapshot?.btts_for);
+
+  let score = confidenceBase;
+  score += probabilityEdge * 1.2;
+  score += Math.min(strengthGap, 14) * 1.4;
+  score += Math.min(formGap, 6) * 1.8;
+  score += Math.min(attackGap, 10) * 0.9;
+  score += Math.min(venueGap, 1.8) * 10;
+
+  if (prediction.predicted_result === "DRAW") score -= 10;
+  if (biggestOutcome < 45) score -= 8;
+  if (draw >= 30) score -= 4;
+  if (predictedTotalGoals < 1.8) score -= 2;
+  if (homeBtts >= 4 && awayBtts >= 4 && probabilityEdge < 10) score -= 3;
+  if (homeOver >= 4 && awayOver >= 4 && probabilityEdge < 10) score -= 2;
+
+  const angle = buildPickAngle(prediction, homeName, awayName, homeSnapshot, awaySnapshot);
+
+  const confidenceLabel = score >= 82 ? "High" : score >= 66 ? "Medium" : "Low";
+  const riskLabel = score >= 82 ? "Low" : score >= 66 ? "Medium" : "High";
+
+  const shortReason =
+    prediction.predicted_result === "HOME"
+      ? `${homeName} rate stronger on the slate with the home win probability and profile signals aligned.`
+      : prediction.predicted_result === "AWAY"
+        ? `${awayName} rate stronger on the slate with the away win probability and profile signals aligned.`
+        : `This is a tighter game, so the angle is more cautious and carries more variance.`;
+
+  return {
+    fixtureId: prediction.fixture_id,
+    homeName,
+    awayName,
+    angle,
+    confidenceLabel,
+    riskLabel,
+    score,
+    shortReason,
+    prediction,
+  };
+}
+
 function buildPickOfTheDay(
   predictions: PredictionRow[],
   snapshotMap: Map<string, SnapshotRow>
@@ -223,149 +336,115 @@ function buildPickOfTheDay(
 
   if (!upcoming.length) return null;
 
-  const scored = upcoming.map((prediction) => {
-    const homeName = firstTeamName(prediction.fixture?.home, "Home");
-    const awayName = firstTeamName(prediction.fixture?.away, "Away");
+  const scored = upcoming
+    .map((prediction) => {
+      const selection = buildSelectionFromPrediction(prediction, snapshotMap);
+      if (!selection) return null;
 
-    const homeId = prediction.home_team_id || prediction.fixture?.home_team_id || null;
-    const awayId = prediction.away_team_id || prediction.fixture?.away_team_id || null;
+      const homeId = prediction.home_team_id || prediction.fixture?.home_team_id || null;
+      const awayId = prediction.away_team_id || prediction.fixture?.away_team_id || null;
+      const homeSnapshot = homeId ? snapshotMap.get(homeId) : undefined;
+      const awaySnapshot = awayId ? snapshotMap.get(awayId) : undefined;
 
-    const homeSnapshot = homeId ? snapshotMap.get(homeId) : undefined;
-    const awaySnapshot = awayId ? snapshotMap.get(awayId) : undefined;
+      const homeWin = numberValue(prediction.home_win_pct);
+      const draw = numberValue(prediction.draw_pct);
+      const awayWin = numberValue(prediction.away_win_pct);
+      const biggestOutcome = Math.max(homeWin, draw, awayWin);
+      const secondOutcome = [homeWin, draw, awayWin].sort((a, b) => b - a)[1] || 0;
+      const probabilityEdge = biggestOutcome - secondOutcome;
 
-    const homeWin = numberValue(prediction.home_win_pct);
-    const draw = numberValue(prediction.draw_pct);
-    const awayWin = numberValue(prediction.away_win_pct);
+      const bullets: string[] = [];
 
-    const biggestOutcome = Math.max(homeWin, draw, awayWin);
-    const secondOutcome = [homeWin, draw, awayWin].sort((a, b) => b - a)[1] || 0;
-    const probabilityEdge = biggestOutcome - secondOutcome;
-
-    const confidenceBase =
-      numberValue(prediction.confidence_score) ||
-      (prediction.confidence_label === "High" || prediction.confidence === "High"
-        ? 76
-        : prediction.confidence_label === "Low" || prediction.confidence === "Low"
-          ? 46
-          : 61);
-
-    const homeStrength = numberValue(homeSnapshot?.overall_strength_score);
-    const awayStrength = numberValue(awaySnapshot?.overall_strength_score);
-    const strengthGap = Math.abs(homeStrength - awayStrength);
-
-    const homeForm = numberValue(homeSnapshot?.last_5_points);
-    const awayForm = numberValue(awaySnapshot?.last_5_points);
-    const formGap = Math.abs(homeForm - awayForm);
-
-    const homeAttack = numberValue(homeSnapshot?.attack_score);
-    const awayAttack = numberValue(awaySnapshot?.attack_score);
-    const attackGap = Math.abs(homeAttack - awayAttack);
-
-    const homeHomePPG = numberValue(homeSnapshot?.home_points_per_game);
-    const awayAwayPPG = numberValue(awaySnapshot?.away_points_per_game);
-    const venueGap = Math.abs(homeHomePPG - awayAwayPPG);
-
-    const predictedTotalGoals =
-      numberValue(prediction.predicted_home_goals) + numberValue(prediction.predicted_away_goals);
-
-    const homeOver = numberValue(homeSnapshot?.over_25_for);
-    const awayOver = numberValue(awaySnapshot?.over_25_for);
-    const homeBtts = numberValue(homeSnapshot?.btts_for);
-    const awayBtts = numberValue(awaySnapshot?.btts_for);
-
-    let score = confidenceBase;
-    score += probabilityEdge * 1.2;
-    score += Math.min(strengthGap, 14) * 1.4;
-    score += Math.min(formGap, 6) * 1.8;
-    score += Math.min(attackGap, 10) * 0.9;
-    score += Math.min(venueGap, 1.8) * 10;
-
-    if (prediction.predicted_result === "DRAW") score -= 10;
-    if (biggestOutcome < 45) score -= 8;
-    if (draw >= 30) score -= 4;
-    if (predictedTotalGoals < 1.8) score -= 2;
-    if (homeBtts >= 4 && awayBtts >= 4 && probabilityEdge < 10) score -= 3;
-    if (homeOver >= 4 && awayOver >= 4 && probabilityEdge < 10) score -= 2;
-
-    const angle = buildPickAngle(prediction, homeName, awayName, homeSnapshot, awaySnapshot);
-
-    const confidenceLabel =
-      score >= 82 ? "High" : score >= 66 ? "Medium" : "Low";
-
-    const riskLabel =
-      score >= 82 ? "Low" : score >= 66 ? "Medium" : "High";
-
-    const bullets: string[] = [];
-
-    if (prediction.predicted_result === "HOME") {
-      bullets.push(
-        `${homeName} have the stronger model outcome at ${homeWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point edge.`
-      );
-      if (homeStrength > awayStrength) {
+      if (prediction.predicted_result === "HOME") {
         bullets.push(
-          `${homeName} lead on strength score ${homeStrength.toFixed(1)} vs ${awayStrength.toFixed(1)}.`
+          `${selection.homeName} lead the model at ${homeWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point outcome edge.`
         );
-      }
-      if (homeForm > awayForm) {
+        if (numberValue(homeSnapshot?.overall_strength_score) > numberValue(awaySnapshot?.overall_strength_score)) {
+          bullets.push(
+            `${selection.homeName} also have the stronger overall strength profile.`
+          );
+        }
+        if (numberValue(homeSnapshot?.last_5_points) > numberValue(awaySnapshot?.last_5_points)) {
+          bullets.push(
+            `${selection.homeName} come in with stronger recent form over the last five matches.`
+          );
+        }
+      } else if (prediction.predicted_result === "AWAY") {
         bullets.push(
-          `${homeName} also come in with better recent form (${homeForm.toFixed(0)} vs ${awayForm.toFixed(0)} points from the last five).`
+          `${selection.awayName} lead the model at ${awayWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point outcome edge.`
         );
+        if (numberValue(awaySnapshot?.overall_strength_score) > numberValue(homeSnapshot?.overall_strength_score)) {
+          bullets.push(
+            `${selection.awayName} also have the stronger overall strength profile.`
+          );
+        }
+        if (numberValue(awaySnapshot?.last_5_points) > numberValue(homeSnapshot?.last_5_points)) {
+          bullets.push(
+            `${selection.awayName} come in with stronger recent form over the last five matches.`
+          );
+        }
+      } else {
+        bullets.push(`The model is not strongly separating either side in this match.`);
+        bullets.push(`Draw-heavy games are less ideal for a headline pick, so conviction is lower.`);
       }
-    } else if (prediction.predicted_result === "AWAY") {
-      bullets.push(
-        `${awayName} have the stronger model outcome at ${awayWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point edge.`
-      );
-      if (awayStrength > homeStrength) {
-        bullets.push(
-          `${awayName} lead on strength score ${awayStrength.toFixed(1)} vs ${homeStrength.toFixed(1)}.`
-        );
-      }
-      if (awayForm > homeForm) {
-        bullets.push(
-          `${awayName} also come in with better recent form (${awayForm.toFixed(0)} vs ${homeForm.toFixed(0)} points from the last five).`
-        );
-      }
-    } else {
-      bullets.push(
-        `The model is not strongly separating either side, which keeps the angle tighter and less aggressive.`
-      );
-      bullets.push(
-        `Draw probability is ${draw.toFixed(1)}%, so this is not ideal for Pick of the Day unless the rest of the slate is weak.`
-      );
-    }
 
-    if (Math.abs(homeHomePPG - awayAwayPPG) >= 0.5) {
-      const venueLeader = homeHomePPG > awayAwayPPG ? homeName : awayName;
-      bullets.push(
-        `${venueLeader} also have the better venue profile in this matchup.`
-      );
-    }
+      bullets.push(`Angle selected: ${selection.angle}.`);
 
-    const shortReason =
-      prediction.predicted_result === "HOME"
-        ? `${homeName} rate best on the current slate because the home win probability, strength edge, and recent form all align.`
-        : prediction.predicted_result === "AWAY"
-          ? `${awayName} rate best on the current slate because the away win probability, strength edge, and recent form all align.`
-          : `This is the best available angle from the current slate, but it is a tighter and higher-variance spot.`;
-
-    return {
-      prediction,
-      homeName,
-      awayName,
-      angle,
-      confidenceLabel,
-      riskLabel,
-      score,
-      shortReason,
-      bullets: bullets.slice(0, 4),
-    };
-  });
+      return {
+        prediction,
+        homeName: selection.homeName,
+        awayName: selection.awayName,
+        angle: selection.angle,
+        confidenceLabel: selection.confidenceLabel,
+        riskLabel: selection.riskLabel,
+        score: selection.score,
+        shortReason: selection.shortReason,
+        bullets: bullets.slice(0, 4),
+      };
+    })
+    .filter(Boolean) as PickOfTheDay[];
 
   scored.sort((a, b) => b.score - a.score);
   return scored[0] || null;
 }
 
-export default async function HomePage() {
+function normaliseSlipIds(raw?: string | string[]) {
+  const value = Array.isArray(raw) ? raw.join(",") : raw || "";
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildSlipHref(ids: string[]) {
+  if (!ids.length) return "/";
+  return `/?slip=${ids.join(",")}`;
+}
+
+function addSlipId(currentIds: string[], id: string) {
+  if (currentIds.includes(id)) return currentIds;
+  return [...currentIds, id];
+}
+
+function removeSlipId(currentIds: string[], id: string) {
+  return currentIds.filter((item) => item !== id);
+}
+
+function average(values: number[]) {
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function slipStrengthLabel(avgScore: number) {
+  if (avgScore >= 82) return "Strong";
+  if (avgScore >= 68) return "Playable";
+  return "Risky";
+}
+
+export default async function HomePage({ searchParams }: PageProps) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const selectedSlipIds = normaliseSlipIds(resolvedSearchParams?.slip);
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -422,9 +501,8 @@ export default async function HomePage() {
         `)
         .eq("league_code", "PL")
         .eq("season", 2025)
-        .gte("fixture.utc_date", now)
         .order("updated_at", { ascending: false })
-        .limit(12),
+        .limit(16),
 
       supabase
         .from("standings")
@@ -474,22 +552,38 @@ export default async function HomePage() {
     snapshotMap.set(row.team_id, row);
   }
 
+  const upcomingPredictions = typedPredictions.filter((prediction) => {
+    const kickOff = prediction.fixture?.utc_date ? new Date(prediction.fixture.utc_date).getTime() : 0;
+    return !!prediction.fixture_id && kickOff > Date.now();
+  });
+
+  const selections = upcomingPredictions
+    .map((prediction) => buildSelectionFromPrediction(prediction, snapshotMap))
+    .filter(Boolean) as SlipSelection[];
+
+  selections.sort((a, b) => b.score - a.score);
+
   const strongestTeam = firstTeamName(typedSnapshots[0]?.team, "-");
-  const highConfidenceCount = typedPredictions.filter(
-    (p) => (p.confidence_label || p.confidence) === "High"
-  ).length;
+  const highConfidenceCount = selections.filter((p) => p.confidenceLabel === "High").length;
   const avgConfidence =
-    typedPredictions.length > 0
-      ? typedPredictions.reduce((sum, p) => sum + Number(p.confidence_score || 0), 0) /
-        typedPredictions.length
-      : 0;
+    selections.length > 0 ? average(selections.map((p) => p.score)) : 0;
   const avgHomeWinPct =
-    typedPredictions.length > 0
-      ? typedPredictions.reduce((sum, p) => sum + Number(p.home_win_pct || 0), 0) /
-        typedPredictions.length
+    upcomingPredictions.length > 0
+      ? upcomingPredictions.reduce((sum, p) => sum + Number(p.home_win_pct || 0), 0) /
+        upcomingPredictions.length
       : 0;
 
-  const pickOfTheDay = buildPickOfTheDay(typedPredictions, snapshotMap);
+  const pickOfTheDay = buildPickOfTheDay(upcomingPredictions, snapshotMap);
+  const selectedSlip = selections.filter((item) => selectedSlipIds.includes(item.fixtureId));
+
+  const totalSlipScore = average(selectedSlip.map((item) => item.score));
+  const slipConfidence =
+    totalSlipScore >= 82 ? "High" : totalSlipScore >= 68 ? "Medium" : "Low";
+  const slipRisk =
+    totalSlipScore >= 82 ? "Low" : totalSlipScore >= 68 ? "Medium" : "High";
+
+  const suggestedTwoLeg = selections.slice(0, 2);
+  const suggestedThreeLeg = selections.slice(0, 3);
 
   return (
     <main
@@ -542,7 +636,7 @@ export default async function HomePage() {
 
               <p style={{ margin: 0, color: "#dbeafe", fontSize: "15px", lineHeight: 1.6 }}>
                 AI-driven match projections using fixture data, standings, team form,
-                snapshot strength scores, venue splits, and betting insight logic.
+                snapshot strength scores, venue splits, and a rule-based betting insights layer.
               </p>
             </div>
 
@@ -748,12 +842,8 @@ export default async function HomePage() {
                     },
                   },
                   {
-                    label: "Win edge",
-                    value: `${Math.max(
-                      numberValue(pickOfTheDay.prediction.home_win_pct),
-                      numberValue(pickOfTheDay.prediction.draw_pct),
-                      numberValue(pickOfTheDay.prediction.away_win_pct)
-                    ).toFixed(1)}% top outcome`,
+                    label: "Slate score",
+                    value: pickOfTheDay.score.toFixed(1),
                     tone: {
                       bg: "#ecfeff",
                       text: "#0f766e",
@@ -795,6 +885,452 @@ export default async function HomePage() {
 
         <section
           style={{
+            background: "#ffffff",
+            borderRadius: "24px",
+            padding: "22px",
+            border: "1px solid #e5e7eb",
+            boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            marginBottom: "28px",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              background: "linear-gradient(135deg, #0f766e 0%, #0f172a 100%)",
+              margin: "-22px -22px 20px",
+              padding: "22px",
+              color: "#ffffff",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "20px",
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    display: "inline-block",
+                    padding: "6px 10px",
+                    borderRadius: "999px",
+                    background: "rgba(255,255,255,0.14)",
+                    fontSize: "12px",
+                    letterSpacing: "0.3px",
+                    marginBottom: "10px",
+                    fontWeight: 800,
+                  }}
+                >
+                  Bet Slip Builder
+                </div>
+
+                <h2 style={{ margin: "0 0 6px", fontSize: "30px", lineHeight: 1.1 }}>
+                  Build your slip from current model angles
+                </h2>
+
+                <div style={{ color: "#ccfbf1", fontSize: "14px" }}>
+                  Add matches below. This builder uses your current prediction edge, team strength,
+                  form, and venue profile.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  minWidth: "220px",
+                  background: "rgba(255,255,255,0.1)",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  borderRadius: "18px",
+                  padding: "16px",
+                }}
+              >
+                <div style={{ fontSize: "12px", color: "#99f6e4", marginBottom: "6px" }}>
+                  Slip summary
+                </div>
+                <div style={{ fontSize: "28px", fontWeight: 900, marginBottom: "8px" }}>
+                  {selectedSlip.length} leg{selectedSlip.length === 1 ? "" : "s"}
+                </div>
+                <div style={{ fontSize: "13px", color: "#d1fae5" }}>
+                  {selectedSlip.length
+                    ? `${slipStrengthLabel(totalSlipScore)} build • ${slipConfidence} confidence`
+                    : "No selections added yet"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.05fr 0.95fr",
+              gap: "20px",
+              alignItems: "start",
+            }}
+          >
+            <div>
+              {selectedSlip.length === 0 ? (
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px dashed #cbd5e1",
+                    borderRadius: "18px",
+                    padding: "18px",
+                    color: "#475569",
+                    fontSize: "14px",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Start your slip by clicking <strong>Add to slip</strong> on any prediction below.
+                  The panel will build a simple multi-leg view using your existing insight logic.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: "14px" }}>
+                  {selectedSlip.map((item, index) => {
+                    const confidence = confidenceTone(item.confidenceLabel);
+                    const risk = riskTone(item.riskLabel);
+
+                    return (
+                      <div
+                        key={item.fixtureId}
+                        style={{
+                          background: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "20px",
+                          padding: "16px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            alignItems: "flex-start",
+                            flexWrap: "wrap",
+                            marginBottom: "12px",
+                          }}
+                        >
+                          <div>
+                            <div
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: 28,
+                                height: 28,
+                                borderRadius: "999px",
+                                background: "#dbeafe",
+                                color: "#1d4ed8",
+                                fontSize: "12px",
+                                fontWeight: 800,
+                                marginBottom: "8px",
+                              }}
+                            >
+                              {index + 1}
+                            </div>
+                            <div style={{ fontSize: "20px", fontWeight: 800 }}>
+                              {item.homeName} v {item.awayName}
+                            </div>
+                            <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                              {formatDate(item.prediction.fixture?.utc_date)}
+                            </div>
+                          </div>
+
+                          <Link
+                            href={buildSlipHref(removeSlipId(selectedSlipIds, item.fixtureId))}
+                            style={{
+                              textDecoration: "none",
+                              background: "#ffffff",
+                              border: "1px solid #e2e8f0",
+                              color: "#334155",
+                              borderRadius: "999px",
+                              padding: "9px 12px",
+                              fontSize: "12px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            Remove
+                          </Link>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                            gap: "12px",
+                            marginBottom: "12px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              background: "#ffffff",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "16px",
+                              padding: "12px",
+                            }}
+                          >
+                            <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>
+                              Bet angle
+                            </div>
+                            <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.angle}</div>
+                          </div>
+
+                          <div
+                            style={{
+                              background: confidence.bg,
+                              border: `1px solid ${confidence.border}`,
+                              borderRadius: "16px",
+                              padding: "12px",
+                              color: confidence.text,
+                            }}
+                          >
+                            <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                              Confidence
+                            </div>
+                            <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.confidenceLabel}</div>
+                          </div>
+
+                          <div
+                            style={{
+                              background: risk.bg,
+                              border: `1px solid ${risk.border}`,
+                              borderRadius: "16px",
+                              padding: "12px",
+                              color: risk.text,
+                            }}
+                          >
+                            <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                              Risk
+                            </div>
+                            <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.riskLabel}</div>
+                          </div>
+
+                          <div
+                            style={{
+                              background: "#ecfeff",
+                              border: "1px solid #99f6e4",
+                              borderRadius: "16px",
+                              padding: "12px",
+                              color: "#0f766e",
+                            }}
+                          >
+                            <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                              Selection score
+                            </div>
+                            <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.score.toFixed(1)}</div>
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.6 }}>
+                          {item.shortReason}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "grid", gap: "16px" }}>
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "20px",
+                  padding: "18px",
+                  boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
+                }}
+              >
+                <div style={{ fontSize: "18px", fontWeight: 800, marginBottom: "14px" }}>
+                  Slip totals
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: "12px",
+                    marginBottom: "14px",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "16px",
+                      padding: "12px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>Legs</div>
+                    <div style={{ fontSize: "24px", fontWeight: 900 }}>{selectedSlip.length}</div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "16px",
+                      padding: "12px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>
+                      Avg score
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 900 }}>
+                      {selectedSlip.length ? totalSlipScore.toFixed(1) : "-"}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: confidenceTone(slipConfidence).bg,
+                      border: `1px solid ${confidenceTone(slipConfidence).border}`,
+                      borderRadius: "16px",
+                      padding: "12px",
+                      color: confidenceTone(slipConfidence).text,
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                      Slip confidence
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 900 }}>{selectedSlip.length ? slipConfidence : "-"}</div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: riskTone(slipRisk).bg,
+                      border: `1px solid ${riskTone(slipRisk).border}`,
+                      borderRadius: "16px",
+                      padding: "12px",
+                      color: riskTone(slipRisk).text,
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                      Slip risk
+                    </div>
+                    <div style={{ fontSize: "24px", fontWeight: 900 }}>{selectedSlip.length ? slipRisk : "-"}</div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "16px",
+                    padding: "14px",
+                    fontSize: "14px",
+                    lineHeight: 1.6,
+                    color: "#334155",
+                  }}
+                >
+                  {selectedSlip.length
+                    ? `This ${selectedSlip.length}-leg slip grades as ${slipStrengthLabel(totalSlipScore).toLowerCase()} based on the average selection score across your chosen angles.`
+                    : "No active selections yet."}
+                </div>
+
+                {selectedSlip.length > 0 && (
+                  <div style={{ marginTop: "14px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                    <Link
+                      href="/"
+                      style={{
+                        textDecoration: "none",
+                        background: "#ffffff",
+                        border: "1px solid #e2e8f0",
+                        color: "#334155",
+                        borderRadius: "999px",
+                        padding: "10px 14px",
+                        fontSize: "12px",
+                        fontWeight: 800,
+                      }}
+                    >
+                      Clear slip
+                    </Link>
+
+                    {selectedSlip.length >= 2 && (
+                      <div
+                        style={{
+                          background: "#dcfce7",
+                          border: "1px solid #86efac",
+                          color: "#166534",
+                          borderRadius: "999px",
+                          padding: "10px 14px",
+                          fontSize: "12px",
+                          fontWeight: 800,
+                        }}
+                      >
+                        Multi-ready
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "20px",
+                  padding: "18px",
+                  boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
+                }}
+              >
+                <div style={{ fontSize: "18px", fontWeight: 800, marginBottom: "14px" }}>
+                  Quick build
+                </div>
+
+                <div style={{ display: "grid", gap: "12px" }}>
+                  <Link
+                    href={buildSlipHref(suggestedTwoLeg.map((item) => item.fixtureId))}
+                    style={{
+                      textDecoration: "none",
+                      background: "#eff6ff",
+                      border: "1px solid #bfdbfe",
+                      color: "#1d4ed8",
+                      borderRadius: "16px",
+                      padding: "14px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", fontWeight: 800, marginBottom: "6px" }}>
+                      Suggested 2-leg slip
+                    </div>
+                    <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "4px" }}>
+                      {suggestedTwoLeg.map((item) => item.angle).join(" + ") || "Not available"}
+                    </div>
+                    <div style={{ fontSize: "13px" }}>
+                      Best two selections by model score
+                    </div>
+                  </Link>
+
+                  <Link
+                    href={buildSlipHref(suggestedThreeLeg.map((item) => item.fixtureId))}
+                    style={{
+                      textDecoration: "none",
+                      background: "#ecfeff",
+                      border: "1px solid #99f6e4",
+                      color: "#0f766e",
+                      borderRadius: "16px",
+                      padding: "14px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", fontWeight: 800, marginBottom: "6px" }}>
+                      Suggested 3-leg slip
+                    </div>
+                    <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "4px" }}>
+                      {suggestedThreeLeg.map((item) => item.angle).join(" + ") || "Not available"}
+                    </div>
+                    <div style={{ fontSize: "13px" }}>
+                      Best three selections by model score
+                    </div>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
             gap: "16px",
@@ -809,8 +1345,8 @@ export default async function HomePage() {
             },
             {
               label: "Predictions loaded",
-              value: typedPredictions.length,
-              sub: "Latest model outputs",
+              value: selections.length,
+              sub: "Upcoming model outputs",
             },
             {
               label: "High-confidence picks",
@@ -818,8 +1354,8 @@ export default async function HomePage() {
               sub: "Current visible set",
             },
             {
-              label: "Avg confidence score",
-              value: avgConfidence ? avgConfidence.toFixed(2) : "0.00",
+              label: "Avg selection score",
+              value: avgConfidence ? avgConfidence.toFixed(1) : "0.0",
               sub: "Across visible predictions",
             },
             {
@@ -872,7 +1408,7 @@ export default async function HomePage() {
             </h2>
 
             <div style={{ display: "grid", gap: "16px" }}>
-              {typedPredictions.map((prediction, index) => {
+              {upcomingPredictions.map((prediction, index) => {
                 const confidence = prediction.confidence_label || prediction.confidence || "Medium";
                 const tone = confidenceTone(confidence);
 
@@ -906,64 +1442,74 @@ export default async function HomePage() {
                   awayName
                 );
 
+                const selection = buildSelectionFromPrediction(prediction, snapshotMap);
                 const isPickOfDay = pickOfTheDay?.prediction.fixture_id === prediction.fixture_id;
+                const inSlip = !!prediction.fixture_id && selectedSlipIds.includes(prediction.fixture_id);
 
                 return (
-                  <Link
+                  <div
                     key={`${prediction.fixture_id || index}-${index}`}
-                    href={prediction.fixture_id ? `/match/${prediction.fixture_id}` : "#"}
                     style={{
-                      textDecoration: "none",
-                      color: "inherit",
-                      display: "block",
+                      padding: "18px",
+                      borderRadius: "22px",
+                      background: inSlip ? "#f0fdf4" : isPickOfDay ? "#eff6ff" : "#f9fafb",
+                      border: `1px solid ${inSlip ? "#86efac" : isPickOfDay ? "#bfdbfe" : "#e5e7eb"}`,
+                      boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
                     }}
                   >
                     <div
                       style={{
-                        padding: "18px",
-                        borderRadius: "22px",
-                        background: isPickOfDay ? "#eff6ff" : "#f9fafb",
-                        border: `1px solid ${isPickOfDay ? "#bfdbfe" : "#e5e7eb"}`,
-                        transition: "transform 0.15s ease, box-shadow 0.15s ease",
-                        boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
-                        cursor: prediction.fixture_id ? "pointer" : "default",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        alignItems: "flex-start",
+                        flexWrap: "wrap",
+                        marginBottom: "14px",
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: "12px",
-                          alignItems: "flex-start",
-                          flexWrap: "wrap",
-                          marginBottom: "14px",
-                        }}
-                      >
-                        <div>
-                          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                            <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "5px" }}>
-                              {homeName} v {awayName}
+                      <div>
+                        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                          <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "5px" }}>
+                            {homeName} v {awayName}
+                          </div>
+
+                          {isPickOfDay && (
+                            <div
+                              style={{
+                                background: "#1d4ed8",
+                                color: "#ffffff",
+                                borderRadius: "999px",
+                                padding: "5px 9px",
+                                fontSize: "11px",
+                                fontWeight: 800,
+                              }}
+                            >
+                              PICK OF THE DAY
                             </div>
-                            {isPickOfDay && (
-                              <div
-                                style={{
-                                  background: "#1d4ed8",
-                                  color: "#ffffff",
-                                  borderRadius: "999px",
-                                  padding: "5px 9px",
-                                  fontSize: "11px",
-                                  fontWeight: 800,
-                                }}
-                              >
-                                PICK OF THE DAY
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ fontSize: "14px", color: "#6b7280" }}>
-                            {formatDate(prediction.fixture?.utc_date)}
-                          </div>
+                          )}
+
+                          {inSlip && (
+                            <div
+                              style={{
+                                background: "#166534",
+                                color: "#ffffff",
+                                borderRadius: "999px",
+                                padding: "5px 9px",
+                                fontSize: "11px",
+                                fontWeight: 800,
+                              }}
+                            >
+                              IN SLIP
+                            </div>
+                          )}
                         </div>
 
+                        <div style={{ fontSize: "14px", color: "#6b7280" }}>
+                          {formatDate(prediction.fixture?.utc_date)}
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                         <div
                           style={{
                             background: tone.bg,
@@ -977,10 +1523,156 @@ export default async function HomePage() {
                         >
                           {confidence} confidence
                         </div>
+
+                        {prediction.fixture_id && (
+                          <Link
+                            href={
+                              inSlip
+                                ? buildSlipHref(removeSlipId(selectedSlipIds, prediction.fixture_id))
+                                : buildSlipHref(addSlipId(selectedSlipIds, prediction.fixture_id))
+                            }
+                            style={{
+                              textDecoration: "none",
+                              background: inSlip ? "#ffffff" : "#1d4ed8",
+                              color: inSlip ? "#334155" : "#ffffff",
+                              border: inSlip ? "1px solid #cbd5e1" : "1px solid #1d4ed8",
+                              borderRadius: "999px",
+                              padding: "8px 12px",
+                              fontSize: "12px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            {inSlip ? "Remove from slip" : "Add to slip"}
+                          </Link>
+                        )}
+
+                        {prediction.fixture_id && (
+                          <Link
+                            href={`/match/${prediction.fixture_id}`}
+                            style={{
+                              textDecoration: "none",
+                              background: "#ffffff",
+                              color: "#334155",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: "999px",
+                              padding: "8px 12px",
+                              fontSize: "12px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            Match page
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: "14px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          borderRadius: "18px",
+                          padding: "16px",
+                          border: "1px solid #e5e7eb",
+                        }}
+                      >
+                        <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "8px" }}>
+                          Predicted score
+                        </div>
+                        <div style={{ fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>
+                          {formatOneDecimal(prediction.predicted_home_goals)} -{" "}
+                          {formatOneDecimal(prediction.predicted_away_goals)}
+                        </div>
+                        <div style={{ fontSize: "14px", color: "#374151", marginBottom: "8px" }}>
+                          Lean: <strong>{resultLabel(prediction.predicted_result)}</strong>
+                        </div>
+                        {selection && (
+                          <div style={{ fontSize: "14px", color: "#0f766e", fontWeight: 800 }}>
+                            Slip angle: {selection.angle}
+                          </div>
+                        )}
                       </div>
 
                       <div
                         style={{
+                          background: "#ffffff",
+                          borderRadius: "18px",
+                          padding: "16px",
+                          border: "1px solid #e5e7eb",
+                        }}
+                      >
+                        <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "10px" }}>
+                          Win probabilities
+                        </div>
+
+                        <div style={{ display: "grid", gap: "10px", fontSize: "14px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span>{homeName}</span>
+                            <strong>{formatPct(prediction.home_win_pct)}</strong>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span>Draw</span>
+                            <strong>{formatPct(prediction.draw_pct)}</strong>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span>{awayName}</span>
+                            <strong>{formatPct(prediction.away_win_pct)}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "10px",
+                        flexWrap: "wrap",
+                        marginTop: "14px",
+                      }}
+                    >
+                      {[strengthEdge, attackEdge, formEdge].map((badge) => (
+                        <div
+                          key={badge}
+                          style={{
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: "999px",
+                            padding: "7px 10px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {badge}
+                        </div>
+                      ))}
+
+                      {selection && (
+                        <div
+                          style={{
+                            background: "#ecfeff",
+                            color: "#0f766e",
+                            border: "1px solid #99f6e4",
+                            borderRadius: "999px",
+                            padding: "7px 10px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          Score {selection.score.toFixed(1)}
+                        </div>
+                      )}
+                    </div>
+
+                    {(homeSnapshot || awaySnapshot) && (
+                      <div
+                        style={{
+                          marginTop: "16px",
                           display: "grid",
                           gridTemplateColumns: "1fr 1fr",
                           gap: "14px",
@@ -990,203 +1682,115 @@ export default async function HomePage() {
                           style={{
                             background: "#ffffff",
                             borderRadius: "18px",
-                            padding: "16px",
+                            padding: "14px",
                             border: "1px solid #e5e7eb",
                           }}
                         >
-                          <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "8px" }}>
-                            Predicted score
-                          </div>
-                          <div style={{ fontSize: "32px", fontWeight: 900, marginBottom: "8px" }}>
-                            {formatOneDecimal(prediction.predicted_home_goals)} -{" "}
-                            {formatOneDecimal(prediction.predicted_away_goals)}
-                          </div>
-                          <div style={{ fontSize: "14px", color: "#374151" }}>
-                            Lean: <strong>{resultLabel(prediction.predicted_result)}</strong>
-                          </div>
-                          <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "8px" }}>
-                            Model: <strong>{prediction.model_version || "-"}</strong>
-                          </div>
+                          <div style={{ fontWeight: 800, marginBottom: "10px" }}>{homeName}</div>
+
+                          {[
+                            ["Strength", homeSnapshot?.overall_strength_score, 100],
+                            ["Attack", homeSnapshot?.attack_score, 200],
+                            ["Defence", homeSnapshot?.defence_score, 200],
+                            ["Form", homeSnapshot?.last_5_points, 15],
+                          ].map(([label, value, max]) => (
+                            <div key={String(label)} style={{ marginBottom: "10px" }}>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  fontSize: "12px",
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                <span>{label}</span>
+                                <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
+                              </div>
+                              <div
+                                style={{
+                                  height: "8px",
+                                  background: "#e5e7eb",
+                                  borderRadius: "999px",
+                                  overflow: "hidden",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: metricBarWidth(value as number, max as number),
+                                    height: "100%",
+                                    background: "#2563eb",
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ))}
                         </div>
 
                         <div
                           style={{
                             background: "#ffffff",
                             borderRadius: "18px",
-                            padding: "16px",
+                            padding: "14px",
                             border: "1px solid #e5e7eb",
                           }}
                         >
-                          <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "10px" }}>
-                            Win probabilities
-                          </div>
+                          <div style={{ fontWeight: 800, marginBottom: "10px" }}>{awayName}</div>
 
-                          <div style={{ display: "grid", gap: "10px", fontSize: "14px" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                              <span>{homeName}</span>
-                              <strong>{formatPct(prediction.home_win_pct)}</strong>
+                          {[
+                            ["Strength", awaySnapshot?.overall_strength_score, 100],
+                            ["Attack", awaySnapshot?.attack_score, 200],
+                            ["Defence", awaySnapshot?.defence_score, 200],
+                            ["Form", awaySnapshot?.last_5_points, 15],
+                          ].map(([label, value, max]) => (
+                            <div key={String(label)} style={{ marginBottom: "10px" }}>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  fontSize: "12px",
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                <span>{label}</span>
+                                <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
+                              </div>
+                              <div
+                                style={{
+                                  height: "8px",
+                                  background: "#e5e7eb",
+                                  borderRadius: "999px",
+                                  overflow: "hidden",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: metricBarWidth(value as number, max as number),
+                                    height: "100%",
+                                    background: "#111827",
+                                  }}
+                                />
+                              </div>
                             </div>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                              <span>Draw</span>
-                              <strong>{formatPct(prediction.draw_pct)}</strong>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                              <span>{awayName}</span>
-                              <strong>{formatPct(prediction.away_win_pct)}</strong>
-                            </div>
-                          </div>
+                          ))}
                         </div>
                       </div>
+                    )}
 
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "10px",
-                          flexWrap: "wrap",
-                          marginTop: "14px",
-                        }}
-                      >
-                        {[strengthEdge, attackEdge, formEdge].map((badge) => (
-                          <div
-                            key={badge}
-                            style={{
-                              background: "#eff6ff",
-                              color: "#1d4ed8",
-                              border: "1px solid #bfdbfe",
-                              borderRadius: "999px",
-                              padding: "7px 10px",
-                              fontSize: "12px",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {badge}
-                          </div>
-                        ))}
-                      </div>
-
-                      {(homeSnapshot || awaySnapshot) && (
-                        <div
-                          style={{
-                            marginTop: "16px",
-                            display: "grid",
-                            gridTemplateColumns: "1fr 1fr",
-                            gap: "14px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              background: "#ffffff",
-                              borderRadius: "18px",
-                              padding: "14px",
-                              border: "1px solid #e5e7eb",
-                            }}
-                          >
-                            <div style={{ fontWeight: 800, marginBottom: "10px" }}>{homeName}</div>
-
-                            {[
-                              ["Strength", homeSnapshot?.overall_strength_score, 100],
-                              ["Attack", homeSnapshot?.attack_score, 200],
-                              ["Defence", homeSnapshot?.defence_score, 200],
-                              ["Form", homeSnapshot?.last_5_points, 15],
-                            ].map(([label, value, max]) => (
-                              <div key={String(label)} style={{ marginBottom: "10px" }}>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    fontSize: "12px",
-                                    marginBottom: "4px",
-                                  }}
-                                >
-                                  <span>{label}</span>
-                                  <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
-                                </div>
-                                <div
-                                  style={{
-                                    height: "8px",
-                                    background: "#e5e7eb",
-                                    borderRadius: "999px",
-                                    overflow: "hidden",
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      width: metricBarWidth(value as number, max as number),
-                                      height: "100%",
-                                      background: "#2563eb",
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-
-                          <div
-                            style={{
-                              background: "#ffffff",
-                              borderRadius: "18px",
-                              padding: "14px",
-                              border: "1px solid #e5e7eb",
-                            }}
-                          >
-                            <div style={{ fontWeight: 800, marginBottom: "10px" }}>{awayName}</div>
-
-                            {[
-                              ["Strength", awaySnapshot?.overall_strength_score, 100],
-                              ["Attack", awaySnapshot?.attack_score, 200],
-                              ["Defence", awaySnapshot?.defence_score, 200],
-                              ["Form", awaySnapshot?.last_5_points, 15],
-                            ].map(([label, value, max]) => (
-                              <div key={String(label)} style={{ marginBottom: "10px" }}>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    fontSize: "12px",
-                                    marginBottom: "4px",
-                                  }}
-                                >
-                                  <span>{label}</span>
-                                  <strong>{Number(value || 0).toFixed(label === "Form" ? 0 : 1)}</strong>
-                                </div>
-                                <div
-                                  style={{
-                                    height: "8px",
-                                    background: "#e5e7eb",
-                                    borderRadius: "999px",
-                                    overflow: "hidden",
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      width: metricBarWidth(value as number, max as number),
-                                      height: "100%",
-                                      background: "#111827",
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div
-                        style={{
-                          marginTop: "14px",
-                          fontSize: "14px",
-                          color: "#374151",
-                          lineHeight: 1.55,
-                        }}
-                      >
-                        {prediction.explanation || "No explanation available yet."}
-                      </div>
+                    <div
+                      style={{
+                        marginTop: "14px",
+                        fontSize: "14px",
+                        color: "#374151",
+                        lineHeight: 1.55,
+                      }}
+                    >
+                      {prediction.explanation || "No explanation available yet."}
                     </div>
-                  </Link>
+                  </div>
                 );
               })}
 
-              {typedPredictions.length === 0 && (
+              {upcomingPredictions.length === 0 && (
                 <div style={{ color: "#6b7280" }}>No predictions found.</div>
               )}
             </div>
