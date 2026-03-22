@@ -362,6 +362,42 @@ async function getRecentTeamFixtures(
   return (data || []) as FixtureRow[];
 }
 
+async function getRecentVenueFixtures(
+  supabase: any,
+  teamId: string,
+  venue: "home" | "away",
+  beforeDate: string | null | undefined,
+  leagueCode?: string | null,
+  season?: number | null
+) {
+  let query = supabase
+    .from("fixtures")
+    .select(`
+      id,
+      provider_match_id,
+      league_code,
+      season,
+      status,
+      utc_date,
+      home_team_id,
+      away_team_id,
+      home_score,
+      away_score
+    `)
+    .in("status", FINISHED_STATUSES)
+    .lt("utc_date", beforeDate || "9999-12-31T23:59:59Z")
+    .order("utc_date", { ascending: false })
+    .limit(MAX_RECENT);
+
+  query = venue === "home" ? query.eq("home_team_id", teamId) : query.eq("away_team_id", teamId);
+
+  if (leagueCode) query = query.eq("league_code", leagueCode);
+  if (season) query = query.eq("season", season);
+
+  const { data } = await query;
+  return (data || []) as FixtureRow[];
+}
+
 async function getHeadToHeadFixtures(
   supabase: any,
   homeTeamId: string,
@@ -545,6 +581,121 @@ function MetricRow({
   );
 }
 
+function SplitFormCard({
+  title,
+  teamName,
+  fixtures,
+  teamId,
+  accent,
+}: {
+  title: string;
+  teamName: string;
+  fixtures: FixtureRow[];
+  teamId: string;
+  accent: "blue" | "teal";
+}) {
+  const summary = summariseForm(fixtures, teamId);
+  const accentBg = accent === "blue" ? "#dbeafe" : "#ccfbf1";
+  const accentText = accent === "blue" ? "#1d4ed8" : "#0f766e";
+
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        borderRadius: "20px",
+        padding: "18px",
+        border: "1px solid #e5e7eb",
+        boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+      }}
+    >
+      <div
+        style={{
+          display: "inline-block",
+          borderRadius: "999px",
+          padding: "6px 10px",
+          background: accentBg,
+          color: accentText,
+          fontSize: "12px",
+          fontWeight: 800,
+          marginBottom: "10px",
+        }}
+      >
+        {title}
+      </div>
+
+      <div style={{ fontSize: "18px", fontWeight: 800, marginBottom: "12px" }}>{teamName}</div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: "12px",
+        }}
+      >
+        <div
+          style={{
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+            borderRadius: "16px",
+            padding: "12px",
+          }}
+        >
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>W-D-L</div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>
+            {summary.wins}-{summary.draws}-{summary.losses}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+            borderRadius: "16px",
+            padding: "12px",
+          }}
+        >
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>GF-GA</div>
+          <div style={{ fontSize: "22px", fontWeight: 800 }}>
+            {summary.goalsFor}-{summary.goalsAgainst}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: "14px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        {fixtures.length === 0 ? (
+          <span style={{ fontSize: "13px", color: "#6b7280" }}>No completed matches found.</span>
+        ) : (
+          fixtures.map((fixture) => {
+            const result = getOutcomeForTeam(fixture, teamId);
+            const tone = outcomeTone(result);
+
+            return (
+              <div
+                key={fixture.id}
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: "999px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: tone.bg,
+                  color: tone.text,
+                  border: `1px solid ${tone.border}`,
+                  fontSize: "12px",
+                  fontWeight: 800,
+                }}
+              >
+                {result}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FixtureList({
   title,
   fixtures,
@@ -671,6 +822,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
     prediction,
     homeRecent,
     awayRecent,
+    homeHomeRecent,
+    awayAwayRecent,
     h2h,
     initialTeamMap,
     homeSnapshot,
@@ -691,6 +844,22 @@ export default async function MatchDetailsPage({ params }: PageProps) {
       fixture.league_code,
       fixture.season
     ),
+    getRecentVenueFixtures(
+      supabase,
+      homeTeamId,
+      "home",
+      fixture.utc_date,
+      fixture.league_code,
+      fixture.season
+    ),
+    getRecentVenueFixtures(
+      supabase,
+      awayTeamId,
+      "away",
+      fixture.utc_date,
+      fixture.league_code,
+      fixture.season
+    ),
     getHeadToHeadFixtures(
       supabase,
       homeTeamId,
@@ -707,6 +876,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
   const extraTeamIds = [
     ...homeRecent.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
     ...awayRecent.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
+    ...homeHomeRecent.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
+    ...awayAwayRecent.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
     ...h2h.flatMap((f) => [f.home_team_id || "", f.away_team_id || ""]),
   ].filter(Boolean);
 
@@ -786,7 +957,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                   marginBottom: "12px",
                 }}
               >
-                {fixture.league_code || "League"}{fixture.season ? ` • ${fixture.season}` : ""}
+                {fixture.league_code || "League"}
+                {fixture.season ? ` • ${fixture.season}` : ""}
               </div>
 
               <div style={{ fontSize: "15px", color: "#dbeafe", marginBottom: "10px" }}>
@@ -798,11 +970,25 @@ export default async function MatchDetailsPage({ params }: PageProps) {
               </div>
 
               {isFinishedMatch(fixture) ? (
-                <div style={{ fontSize: "56px", fontWeight: 900, lineHeight: 1, marginBottom: "10px" }}>
+                <div
+                  style={{
+                    fontSize: "56px",
+                    fontWeight: 900,
+                    lineHeight: 1,
+                    marginBottom: "10px",
+                  }}
+                >
                   {fixture.home_score ?? "-"} - {fixture.away_score ?? "-"}
                 </div>
               ) : (
-                <div style={{ fontSize: "44px", fontWeight: 900, lineHeight: 1, marginBottom: "10px" }}>
+                <div
+                  style={{
+                    fontSize: "44px",
+                    fontWeight: 900,
+                    lineHeight: 1,
+                    marginBottom: "10px",
+                  }}
+                >
                   vs
                 </div>
               )}
@@ -820,7 +1006,11 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                   marginBottom: "14px",
                 }}
               >
-                {prediction ? `${confidence} confidence` : isFinishedMatch(fixture) ? "Final result" : "Upcoming fixture"}
+                {prediction
+                  ? `${confidence} confidence`
+                  : isFinishedMatch(fixture)
+                    ? "Final result"
+                    : "Upcoming fixture"}
               </div>
 
               {prediction ? (
@@ -840,7 +1030,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                     {resultLabel(prediction.predicted_result)}
                   </div>
                   <div style={{ fontSize: "13px", color: "#dbeafe" }}>
-                    Predicted score: {prediction.predicted_home_goals ?? "-"} - {prediction.predicted_away_goals ?? "-"}
+                    Predicted score: {prediction.predicted_home_goals ?? "-"} -{" "}
+                    {prediction.predicted_away_goals ?? "-"}
                   </div>
                 </div>
               ) : null}
@@ -858,11 +1049,86 @@ export default async function MatchDetailsPage({ params }: PageProps) {
             marginBottom: "28px",
           }}
         >
-          <StatCard label={`${homeTeam?.name || "Home"} form`} value={`${homeForm.wins}-${homeForm.draws}-${homeForm.losses}`} sub="Last 5 completed matches" />
-          <StatCard label={`${awayTeam?.name || "Away"} form`} value={`${awayForm.wins}-${awayForm.draws}-${awayForm.losses}`} sub="Last 5 completed matches" />
-          <StatCard label="Head-to-head record" value={`${h2hSummary.homeWins}-${h2hSummary.draws}-${h2hSummary.awayWins}`} sub="Home wins • draws • away wins" />
-          <StatCard label="BTTS in H2H" value={`${h2hSummary.bttsCount}/${h2h.length}`} sub="Both teams scored" />
-          <StatCard label="Prediction loaded" value={prediction ? "Yes" : "No"} sub="Current match prediction" />
+          <StatCard
+            label={`${homeTeam?.name || "Home"} form`}
+            value={`${homeForm.wins}-${homeForm.draws}-${homeForm.losses}`}
+            sub="Last 5 completed matches"
+          />
+          <StatCard
+            label={`${awayTeam?.name || "Away"} form`}
+            value={`${awayForm.wins}-${awayForm.draws}-${awayForm.losses}`}
+            sub="Last 5 completed matches"
+          />
+          <StatCard
+            label="Head-to-head record"
+            value={`${h2hSummary.homeWins}-${h2hSummary.draws}-${h2hSummary.awayWins}`}
+            sub="Home wins • draws • away wins"
+          />
+          <StatCard
+            label="BTTS in H2H"
+            value={`${h2hSummary.bttsCount}/${h2h.length}`}
+            sub="Both teams scored"
+          />
+          <StatCard
+            label="Prediction loaded"
+            value={prediction ? "Yes" : "No"}
+            sub="Current match prediction"
+          />
+        </section>
+
+        <section
+          style={{
+            background: "#ffffff",
+            borderRadius: "24px",
+            padding: "22px",
+            border: "1px solid #e5e7eb",
+            boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+            marginBottom: "28px",
+          }}
+        >
+          <h2 style={{ marginTop: 0, marginBottom: "6px", fontSize: "24px" }}>
+            Home / Away Split Form
+          </h2>
+          <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "18px" }}>
+            Quick view of overall form versus venue-specific form before this fixture
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+              gap: "16px",
+            }}
+          >
+            <SplitFormCard
+              title="Home overall"
+              teamName={homeTeam?.name || "Home"}
+              fixtures={homeRecent}
+              teamId={homeTeamId}
+              accent="blue"
+            />
+            <SplitFormCard
+              title="Home at home"
+              teamName={homeTeam?.name || "Home"}
+              fixtures={homeHomeRecent}
+              teamId={homeTeamId}
+              accent="blue"
+            />
+            <SplitFormCard
+              title="Away overall"
+              teamName={awayTeam?.name || "Away"}
+              fixtures={awayRecent}
+              teamId={awayTeamId}
+              accent="teal"
+            />
+            <SplitFormCard
+              title="Away away"
+              teamName={awayTeam?.name || "Away"}
+              fixtures={awayAwayRecent}
+              teamId={awayTeamId}
+              accent="teal"
+            />
+          </div>
         </section>
 
         <section
@@ -883,7 +1149,9 @@ export default async function MatchDetailsPage({ params }: PageProps) {
               boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
             }}
           >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>Team Comparison</h2>
+            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
+              Team Comparison
+            </h2>
 
             <div style={{ display: "grid", gap: "14px" }}>
               <MetricRow
@@ -916,10 +1184,22 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                 marginTop: "18px",
               }}
             >
-              <StatCard label={`${homeTeam?.name || "Home"} last 5 pts`} value={homeSnapshot?.last_5_points ?? 0} />
-              <StatCard label={`${awayTeam?.name || "Away"} last 5 pts`} value={awaySnapshot?.last_5_points ?? 0} />
-              <StatCard label={`${homeTeam?.name || "Home"} clean sheets`} value={homeSnapshot?.clean_sheets ?? 0} />
-              <StatCard label={`${awayTeam?.name || "Away"} clean sheets`} value={awaySnapshot?.clean_sheets ?? 0} />
+              <StatCard
+                label={`${homeTeam?.name || "Home"} last 5 pts`}
+                value={homeSnapshot?.last_5_points ?? 0}
+              />
+              <StatCard
+                label={`${awayTeam?.name || "Away"} last 5 pts`}
+                value={awaySnapshot?.last_5_points ?? 0}
+              />
+              <StatCard
+                label={`${homeTeam?.name || "Home"} clean sheets`}
+                value={homeSnapshot?.clean_sheets ?? 0}
+              />
+              <StatCard
+                label={`${awayTeam?.name || "Away"} clean sheets`}
+                value={awaySnapshot?.clean_sheets ?? 0}
+              />
             </div>
           </div>
 
@@ -932,7 +1212,9 @@ export default async function MatchDetailsPage({ params }: PageProps) {
               boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
             }}
           >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>Prediction Insight</h2>
+            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
+              Prediction Insight
+            </h2>
 
             {!prediction ? (
               <div
@@ -959,7 +1241,10 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                 >
                   <StatCard label="Outcome" value={resultLabel(prediction.predicted_result)} />
                   <StatCard label="Confidence" value={confidence} />
-                  <StatCard label="Predicted score" value={`${prediction.predicted_home_goals ?? "-"} - ${prediction.predicted_away_goals ?? "-"}`} />
+                  <StatCard
+                    label="Predicted score"
+                    value={`${prediction.predicted_home_goals ?? "-"} - ${prediction.predicted_away_goals ?? "-"}`}
+                  />
                 </div>
 
                 <div
@@ -972,9 +1257,24 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                   }}
                 >
                   {[
-                    { label: `${homeTeam?.name || "Home"} win`, value: prediction.home_win_pct, color: "#2563eb", bg: "#dbeafe" },
-                    { label: "Draw", value: prediction.draw_pct, color: "#d97706", bg: "#fef3c7" },
-                    { label: `${awayTeam?.name || "Away"} win`, value: prediction.away_win_pct, color: "#0f766e", bg: "#ccfbf1" },
+                    {
+                      label: `${homeTeam?.name || "Home"} win`,
+                      value: prediction.home_win_pct,
+                      color: "#2563eb",
+                      bg: "#dbeafe",
+                    },
+                    {
+                      label: "Draw",
+                      value: prediction.draw_pct,
+                      color: "#d97706",
+                      bg: "#fef3c7",
+                    },
+                    {
+                      label: `${awayTeam?.name || "Away"} win`,
+                      value: prediction.away_win_pct,
+                      color: "#0f766e",
+                      bg: "#ccfbf1",
+                    },
                   ].map((item) => (
                     <div key={item.label} style={{ marginBottom: "14px" }}>
                       <div
@@ -989,7 +1289,14 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                         <span style={{ color: "#374151" }}>{item.label}</span>
                         <strong>{Number(item.value || 0).toFixed(1)}%</strong>
                       </div>
-                      <div style={{ height: 10, background: item.bg, borderRadius: 999, overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: 10,
+                          background: item.bg,
+                          borderRadius: 999,
+                          overflow: "hidden",
+                        }}
+                      >
                         <div
                           style={{
                             height: "100%",
@@ -1040,7 +1347,9 @@ export default async function MatchDetailsPage({ params }: PageProps) {
               boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
             }}
           >
-            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>Head-to-Head</h2>
+            <h2 style={{ marginTop: 0, marginBottom: "18px", fontSize: "24px" }}>
+              Head-to-Head
+            </h2>
 
             <div
               style={{
@@ -1050,11 +1359,23 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                 marginBottom: "18px",
               }}
             >
-              <StatCard label={`${homeTeam?.name || "Home"} wins`} value={h2hSummary.homeWins} />
+              <StatCard
+                label={`${homeTeam?.name || "Home"} wins`}
+                value={h2hSummary.homeWins}
+              />
               <StatCard label="Draws" value={h2hSummary.draws} />
-              <StatCard label={`${awayTeam?.name || "Away"} wins`} value={h2hSummary.awayWins} />
-              <StatCard label={`${homeTeam?.name || "Home"} goals`} value={h2hSummary.homeGoals} />
-              <StatCard label={`${awayTeam?.name || "Away"} goals`} value={h2hSummary.awayGoals} />
+              <StatCard
+                label={`${awayTeam?.name || "Away"} wins`}
+                value={h2hSummary.awayWins}
+              />
+              <StatCard
+                label={`${homeTeam?.name || "Home"} goals`}
+                value={h2hSummary.homeGoals}
+              />
+              <StatCard
+                label={`${awayTeam?.name || "Away"} goals`}
+                value={h2hSummary.awayGoals}
+              />
               <StatCard label="BTTS" value={`${h2hSummary.bttsCount}/${h2h.length}`} />
             </div>
 
@@ -1094,9 +1415,12 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                     >
                       <div>
                         <div style={{ fontSize: "17px", fontWeight: 800, marginBottom: "5px" }}>
-                          {teamMap[game.home_team_id || ""]?.name || "Home"} v {teamMap[game.away_team_id || ""]?.name || "Away"}
+                          {teamMap[game.home_team_id || ""]?.name || "Home"} v{" "}
+                          {teamMap[game.away_team_id || ""]?.name || "Away"}
                         </div>
-                        <div style={{ fontSize: "13px", color: "#6b7280" }}>{formatDate(game.utc_date)}</div>
+                        <div style={{ fontSize: "13px", color: "#6b7280" }}>
+                          {formatDate(game.utc_date)}
+                        </div>
                       </div>
 
                       <div
