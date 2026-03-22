@@ -62,7 +62,23 @@ type SnapshotRow = {
   overall_strength_score: number | null;
   home_points_per_game?: number | null;
   away_points_per_game?: number | null;
+  btts_for?: number | null;
+  over_25_for?: number | null;
+  failed_to_score?: number | null;
+  clean_sheets?: number | null;
   team?: TeamRef | TeamRef[] | null;
+};
+
+type PickOfTheDay = {
+  prediction: PredictionRow;
+  homeName: string;
+  awayName: string;
+  angle: string;
+  confidenceLabel: string;
+  riskLabel: string;
+  score: number;
+  shortReason: string;
+  bullets: string[];
 };
 
 function firstTeamName(input?: TeamRef | TeamRef[] | null, fallback = "-") {
@@ -118,6 +134,28 @@ function confidenceTone(value?: string | null) {
   };
 }
 
+function riskTone(value?: string) {
+  if (value === "Low") {
+    return {
+      bg: "#dcfce7",
+      text: "#166534",
+      border: "#86efac",
+    };
+  }
+  if (value === "High") {
+    return {
+      bg: "#fee2e2",
+      text: "#991b1b",
+      border: "#fca5a5",
+    };
+  }
+  return {
+    bg: "#fef3c7",
+    text: "#92400e",
+    border: "#fcd34d",
+  };
+}
+
 function edgeLabel(
   home?: number | null,
   away?: number | null,
@@ -136,6 +174,195 @@ function edgeLabel(
 function metricBarWidth(value?: number | null, max = 100) {
   const pct = Math.max(0, Math.min(100, (Number(value || 0) / max) * 100));
   return `${pct}%`;
+}
+
+function numberValue(value?: number | null) {
+  return Number(value || 0);
+}
+
+function buildPickAngle(
+  prediction: PredictionRow,
+  homeName: string,
+  awayName: string,
+  homeSnapshot?: SnapshotRow,
+  awaySnapshot?: SnapshotRow
+) {
+  const homeWin = numberValue(prediction.home_win_pct);
+  const draw = numberValue(prediction.draw_pct);
+  const awayWin = numberValue(prediction.away_win_pct);
+  const homeNonLose = homeWin + draw;
+  const awayNonLose = awayWin + draw;
+
+  const homeStrength = numberValue(homeSnapshot?.overall_strength_score);
+  const awayStrength = numberValue(awaySnapshot?.overall_strength_score);
+
+  if (prediction.predicted_result === "HOME") {
+    if (homeWin >= 60 && homeStrength >= awayStrength) return `${homeName} win`;
+    if (homeNonLose >= 72) return `${homeName} or Draw`;
+    return "Home lean";
+  }
+
+  if (prediction.predicted_result === "AWAY") {
+    if (awayWin >= 60 && awayStrength >= homeStrength) return `${awayName} win`;
+    if (awayNonLose >= 72) return `${awayName} or Draw`;
+    return "Away lean";
+  }
+
+  if (draw >= 30) return "Draw lean";
+  return "Tight match";
+}
+
+function buildPickOfTheDay(
+  predictions: PredictionRow[],
+  snapshotMap: Map<string, SnapshotRow>
+): PickOfTheDay | null {
+  const upcoming = predictions.filter((prediction) => {
+    const kickOff = prediction.fixture?.utc_date ? new Date(prediction.fixture.utc_date).getTime() : 0;
+    return !!prediction.fixture_id && kickOff > Date.now();
+  });
+
+  if (!upcoming.length) return null;
+
+  const scored = upcoming.map((prediction) => {
+    const homeName = firstTeamName(prediction.fixture?.home, "Home");
+    const awayName = firstTeamName(prediction.fixture?.away, "Away");
+
+    const homeId = prediction.home_team_id || prediction.fixture?.home_team_id || null;
+    const awayId = prediction.away_team_id || prediction.fixture?.away_team_id || null;
+
+    const homeSnapshot = homeId ? snapshotMap.get(homeId) : undefined;
+    const awaySnapshot = awayId ? snapshotMap.get(awayId) : undefined;
+
+    const homeWin = numberValue(prediction.home_win_pct);
+    const draw = numberValue(prediction.draw_pct);
+    const awayWin = numberValue(prediction.away_win_pct);
+
+    const biggestOutcome = Math.max(homeWin, draw, awayWin);
+    const secondOutcome = [homeWin, draw, awayWin].sort((a, b) => b - a)[1] || 0;
+    const probabilityEdge = biggestOutcome - secondOutcome;
+
+    const confidenceBase =
+      numberValue(prediction.confidence_score) ||
+      (prediction.confidence_label === "High" || prediction.confidence === "High"
+        ? 76
+        : prediction.confidence_label === "Low" || prediction.confidence === "Low"
+          ? 46
+          : 61);
+
+    const homeStrength = numberValue(homeSnapshot?.overall_strength_score);
+    const awayStrength = numberValue(awaySnapshot?.overall_strength_score);
+    const strengthGap = Math.abs(homeStrength - awayStrength);
+
+    const homeForm = numberValue(homeSnapshot?.last_5_points);
+    const awayForm = numberValue(awaySnapshot?.last_5_points);
+    const formGap = Math.abs(homeForm - awayForm);
+
+    const homeAttack = numberValue(homeSnapshot?.attack_score);
+    const awayAttack = numberValue(awaySnapshot?.attack_score);
+    const attackGap = Math.abs(homeAttack - awayAttack);
+
+    const homeHomePPG = numberValue(homeSnapshot?.home_points_per_game);
+    const awayAwayPPG = numberValue(awaySnapshot?.away_points_per_game);
+    const venueGap = Math.abs(homeHomePPG - awayAwayPPG);
+
+    const predictedTotalGoals =
+      numberValue(prediction.predicted_home_goals) + numberValue(prediction.predicted_away_goals);
+
+    const homeOver = numberValue(homeSnapshot?.over_25_for);
+    const awayOver = numberValue(awaySnapshot?.over_25_for);
+    const homeBtts = numberValue(homeSnapshot?.btts_for);
+    const awayBtts = numberValue(awaySnapshot?.btts_for);
+
+    let score = confidenceBase;
+    score += probabilityEdge * 1.2;
+    score += Math.min(strengthGap, 14) * 1.4;
+    score += Math.min(formGap, 6) * 1.8;
+    score += Math.min(attackGap, 10) * 0.9;
+    score += Math.min(venueGap, 1.8) * 10;
+
+    if (prediction.predicted_result === "DRAW") score -= 10;
+    if (biggestOutcome < 45) score -= 8;
+    if (draw >= 30) score -= 4;
+    if (predictedTotalGoals < 1.8) score -= 2;
+    if (homeBtts >= 4 && awayBtts >= 4 && probabilityEdge < 10) score -= 3;
+    if (homeOver >= 4 && awayOver >= 4 && probabilityEdge < 10) score -= 2;
+
+    const angle = buildPickAngle(prediction, homeName, awayName, homeSnapshot, awaySnapshot);
+
+    const confidenceLabel =
+      score >= 82 ? "High" : score >= 66 ? "Medium" : "Low";
+
+    const riskLabel =
+      score >= 82 ? "Low" : score >= 66 ? "Medium" : "High";
+
+    const bullets: string[] = [];
+
+    if (prediction.predicted_result === "HOME") {
+      bullets.push(
+        `${homeName} have the stronger model outcome at ${homeWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point edge.`
+      );
+      if (homeStrength > awayStrength) {
+        bullets.push(
+          `${homeName} lead on strength score ${homeStrength.toFixed(1)} vs ${awayStrength.toFixed(1)}.`
+        );
+      }
+      if (homeForm > awayForm) {
+        bullets.push(
+          `${homeName} also come in with better recent form (${homeForm.toFixed(0)} vs ${awayForm.toFixed(0)} points from the last five).`
+        );
+      }
+    } else if (prediction.predicted_result === "AWAY") {
+      bullets.push(
+        `${awayName} have the stronger model outcome at ${awayWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point edge.`
+      );
+      if (awayStrength > homeStrength) {
+        bullets.push(
+          `${awayName} lead on strength score ${awayStrength.toFixed(1)} vs ${homeStrength.toFixed(1)}.`
+        );
+      }
+      if (awayForm > homeForm) {
+        bullets.push(
+          `${awayName} also come in with better recent form (${awayForm.toFixed(0)} vs ${homeForm.toFixed(0)} points from the last five).`
+        );
+      }
+    } else {
+      bullets.push(
+        `The model is not strongly separating either side, which keeps the angle tighter and less aggressive.`
+      );
+      bullets.push(
+        `Draw probability is ${draw.toFixed(1)}%, so this is not ideal for Pick of the Day unless the rest of the slate is weak.`
+      );
+    }
+
+    if (Math.abs(homeHomePPG - awayAwayPPG) >= 0.5) {
+      const venueLeader = homeHomePPG > awayAwayPPG ? homeName : awayName;
+      bullets.push(
+        `${venueLeader} also have the better venue profile in this matchup.`
+      );
+    }
+
+    const shortReason =
+      prediction.predicted_result === "HOME"
+        ? `${homeName} rate best on the current slate because the home win probability, strength edge, and recent form all align.`
+        : prediction.predicted_result === "AWAY"
+          ? `${awayName} rate best on the current slate because the away win probability, strength edge, and recent form all align.`
+          : `This is the best available angle from the current slate, but it is a tighter and higher-variance spot.`;
+
+    return {
+      prediction,
+      homeName,
+      awayName,
+      angle,
+      confidenceLabel,
+      riskLabel,
+      score,
+      shortReason,
+      bullets: bullets.slice(0, 4),
+    };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0] || null;
 }
 
 export default async function HomePage() {
@@ -195,8 +422,9 @@ export default async function HomePage() {
         `)
         .eq("league_code", "PL")
         .eq("season", 2025)
+        .gte("fixture.utc_date", now)
         .order("updated_at", { ascending: false })
-        .limit(8),
+        .limit(12),
 
       supabase
         .from("standings")
@@ -224,6 +452,10 @@ export default async function HomePage() {
           overall_strength_score,
           home_points_per_game,
           away_points_per_game,
+          btts_for,
+          over_25_for,
+          failed_to_score,
+          clean_sheets,
           team:team_id(name)
         `)
         .eq("league_code", "PL")
@@ -256,6 +488,8 @@ export default async function HomePage() {
       ? typedPredictions.reduce((sum, p) => sum + Number(p.home_win_pct || 0), 0) /
         typedPredictions.length
       : 0;
+
+  const pickOfTheDay = buildPickOfTheDay(typedPredictions, snapshotMap);
 
   return (
     <main
@@ -299,7 +533,7 @@ export default async function HomePage() {
                   marginBottom: "12px",
                 }}
               >
-                Premier League • Snapshot model active
+                Premier League • Betting Insights mode
               </div>
 
               <h1 style={{ margin: "0 0 8px", fontSize: "38px", lineHeight: 1.1 }}>
@@ -308,7 +542,7 @@ export default async function HomePage() {
 
               <p style={{ margin: 0, color: "#dbeafe", fontSize: "15px", lineHeight: 1.6 }}>
                 AI-driven match projections using fixture data, standings, team form,
-                snapshot strength scores, and home-v-away performance splits.
+                snapshot strength scores, venue splits, and betting insight logic.
               </p>
             </div>
 
@@ -333,6 +567,231 @@ export default async function HomePage() {
             </div>
           </div>
         </section>
+
+        {pickOfTheDay && (
+          <section
+            style={{
+              background: "#ffffff",
+              borderRadius: "24px",
+              padding: "22px",
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+              marginBottom: "28px",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                background: "linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%)",
+                margin: "-22px -22px 20px",
+                padding: "22px",
+                color: "#ffffff",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "20px",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      display: "inline-block",
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      background: "rgba(255,255,255,0.14)",
+                      fontSize: "12px",
+                      letterSpacing: "0.3px",
+                      marginBottom: "10px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    AI Pick of the Day
+                  </div>
+
+                  <h2 style={{ margin: "0 0 6px", fontSize: "30px", lineHeight: 1.1 }}>
+                    {pickOfTheDay.homeName} v {pickOfTheDay.awayName}
+                  </h2>
+
+                  <div style={{ color: "#dbeafe", fontSize: "14px" }}>
+                    {formatDate(pickOfTheDay.prediction.fixture?.utc_date)}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    minWidth: "220px",
+                    background: "rgba(255,255,255,0.1)",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    borderRadius: "18px",
+                    padding: "16px",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", color: "#bfdbfe", marginBottom: "6px" }}>
+                    Best betting angle
+                  </div>
+                  <div style={{ fontSize: "28px", fontWeight: 900, marginBottom: "8px" }}>
+                    {pickOfTheDay.angle}
+                  </div>
+                  <div style={{ fontSize: "13px", color: "#dbeafe" }}>
+                    Ranked top by confidence, edge, and team-profile alignment
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.15fr 0.95fr",
+                gap: "20px",
+                alignItems: "start",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "15px", lineHeight: 1.7, color: "#334155", marginBottom: "16px" }}>
+                  {pickOfTheDay.shortReason}
+                </div>
+
+                <div style={{ display: "grid", gap: "12px", marginBottom: "18px" }}>
+                  {pickOfTheDay.bullets.map((bullet, index) => (
+                    <div
+                      key={`${index}-${bullet}`}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "28px 1fr",
+                        gap: "12px",
+                        alignItems: "start",
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "16px",
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: "999px",
+                          background: "#dbeafe",
+                          color: "#1d4ed8",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "12px",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {index + 1}
+                      </div>
+                      <div style={{ fontSize: "14px", lineHeight: 1.6, color: "#334155" }}>
+                        {bullet}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <Link
+                  href={`/match/${pickOfTheDay.prediction.fixture_id}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    textDecoration: "none",
+                    color: "#ffffff",
+                    background: "#1d4ed8",
+                    borderRadius: "999px",
+                    padding: "12px 18px",
+                    fontSize: "14px",
+                    fontWeight: 800,
+                    boxShadow: "0 8px 20px rgba(37,99,235,0.22)",
+                  }}
+                >
+                  Open full match insight →
+                </Link>
+              </div>
+
+              <div style={{ display: "grid", gap: "14px" }}>
+                {[
+                  {
+                    label: "Confidence",
+                    value: pickOfTheDay.confidenceLabel,
+                    tone: confidenceTone(pickOfTheDay.confidenceLabel),
+                  },
+                  {
+                    label: "Risk",
+                    value: pickOfTheDay.riskLabel,
+                    tone: riskTone(pickOfTheDay.riskLabel),
+                  },
+                  {
+                    label: "Model lean",
+                    value: resultLabel(pickOfTheDay.prediction.predicted_result),
+                    tone: {
+                      bg: "#eff6ff",
+                      text: "#1d4ed8",
+                      border: "#bfdbfe",
+                    },
+                  },
+                  {
+                    label: "Predicted score",
+                    value: `${formatOneDecimal(
+                      pickOfTheDay.prediction.predicted_home_goals
+                    )} - ${formatOneDecimal(pickOfTheDay.prediction.predicted_away_goals)}`,
+                    tone: {
+                      bg: "#f8fafc",
+                      text: "#334155",
+                      border: "#cbd5e1",
+                    },
+                  },
+                  {
+                    label: "Win edge",
+                    value: `${Math.max(
+                      numberValue(pickOfTheDay.prediction.home_win_pct),
+                      numberValue(pickOfTheDay.prediction.draw_pct),
+                      numberValue(pickOfTheDay.prediction.away_win_pct)
+                    ).toFixed(1)}% top outcome`,
+                    tone: {
+                      bg: "#ecfeff",
+                      text: "#0f766e",
+                      border: "#99f6e4",
+                    },
+                  },
+                ].map((card) => (
+                  <div
+                    key={card.label}
+                    style={{
+                      background: "#ffffff",
+                      borderRadius: "18px",
+                      border: "1px solid #e5e7eb",
+                      boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: card.tone.bg,
+                        color: card.tone.text,
+                        borderBottom: `1px solid ${card.tone.border}`,
+                        padding: "10px 14px",
+                        fontSize: "12px",
+                        fontWeight: 800,
+                      }}
+                    >
+                      {card.label}
+                    </div>
+                    <div style={{ padding: "14px", fontSize: "24px", fontWeight: 900 }}>
+                      {card.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
 
         <section
           style={{
@@ -447,6 +906,8 @@ export default async function HomePage() {
                   awayName
                 );
 
+                const isPickOfDay = pickOfTheDay?.prediction.fixture_id === prediction.fixture_id;
+
                 return (
                   <Link
                     key={`${prediction.fixture_id || index}-${index}`}
@@ -461,8 +922,8 @@ export default async function HomePage() {
                       style={{
                         padding: "18px",
                         borderRadius: "22px",
-                        background: "#f9fafb",
-                        border: "1px solid #e5e7eb",
+                        background: isPickOfDay ? "#eff6ff" : "#f9fafb",
+                        border: `1px solid ${isPickOfDay ? "#bfdbfe" : "#e5e7eb"}`,
                         transition: "transform 0.15s ease, box-shadow 0.15s ease",
                         boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
                         cursor: prediction.fixture_id ? "pointer" : "default",
@@ -479,8 +940,24 @@ export default async function HomePage() {
                         }}
                       >
                         <div>
-                          <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "5px" }}>
-                            {homeName} v {awayName}
+                          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                            <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "5px" }}>
+                              {homeName} v {awayName}
+                            </div>
+                            {isPickOfDay && (
+                              <div
+                                style={{
+                                  background: "#1d4ed8",
+                                  color: "#ffffff",
+                                  borderRadius: "999px",
+                                  padding: "5px 9px",
+                                  fontSize: "11px",
+                                  fontWeight: 800,
+                                }}
+                              >
+                                PICK OF THE DAY
+                              </div>
+                            )}
                           </div>
                           <div style={{ fontSize: "14px", color: "#6b7280" }}>
                             {formatDate(prediction.fixture?.utc_date)}
