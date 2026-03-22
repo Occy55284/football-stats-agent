@@ -127,7 +127,7 @@ function summariseForm(fixtures: FixtureRow[], teamId: string) {
   return { wins, draws, losses, goalsFor, goalsAgainst };
 }
 
-async function getFixtureById(supabase: ReturnType<typeof createClient>, id: string) {
+async function getFixtureById(supabase: any, id: string) {
   const { data, error } = await supabase
     .from("fixtures")
     .select(`
@@ -149,10 +149,7 @@ async function getFixtureById(supabase: ReturnType<typeof createClient>, id: str
   return data as FixtureRow;
 }
 
-async function getPredictionForFixture(
-  supabase: ReturnType<typeof createClient>,
-  fixtureId: string
-) {
+async function getPredictionForFixture(supabase: any, fixtureId: string) {
   const { data } = await supabase
     .from("predictions")
     .select(`
@@ -175,7 +172,7 @@ async function getPredictionForFixture(
 }
 
 async function getTeamsMap(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   ids: string[]
 ): Promise<Record<string, TeamRow>> {
   const uniqueIds = [...new Set(ids.filter(Boolean))];
@@ -194,7 +191,7 @@ async function getTeamsMap(
 }
 
 async function getRecentTeamFixtures(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   teamId: string,
   beforeDate: string | null | undefined,
   leagueCode?: string | null,
@@ -216,10 +213,10 @@ async function getRecentTeamFixtures(
     `)
     .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
     .in("status", FINISHED_STATUSES)
+    .lt("utc_date", beforeDate || "9999-12-31T23:59:59Z")
     .order("utc_date", { ascending: false })
     .limit(MAX_RECENT);
 
-  if (beforeDate) query = query.lt("utc_date", beforeDate);
   if (leagueCode) query = query.eq("league_code", leagueCode);
   if (season) query = query.eq("season", season);
 
@@ -228,7 +225,7 @@ async function getRecentTeamFixtures(
 }
 
 async function getHeadToHeadFixtures(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   homeTeamId: string,
   awayTeamId: string,
   beforeDate: string | null | undefined,
@@ -253,10 +250,10 @@ async function getHeadToHeadFixtures(
       `and(home_team_id.eq.${homeTeamId},away_team_id.eq.${awayTeamId}),and(home_team_id.eq.${awayTeamId},away_team_id.eq.${homeTeamId})`
     )
     .in("status", FINISHED_STATUSES)
+    .lt("utc_date", beforeDate || "9999-12-31T23:59:59Z")
     .order("utc_date", { ascending: false })
     .limit(MAX_H2H);
 
-  if (beforeDate) query = query.lt("utc_date", beforeDate);
   if (leagueCode) query = query.eq("league_code", leagueCode);
   if (season) query = query.eq("season", season);
 
@@ -279,7 +276,7 @@ function PercentBar({
         <span>{label}</span>
         <span>{safeValue}%</span>
       </div>
-      <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+      <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
         <div
           className="h-2 rounded-full bg-sky-500"
           style={{ width: `${safeValue}%` }}
@@ -311,7 +308,7 @@ function TeamBadge({
               className="h-10 w-10 rounded-full bg-white object-contain p-1"
             />
           ) : (
-            <div className="h-10 w-10 rounded-full bg-zinc-800 border border-zinc-700" />
+            <div className="h-10 w-10 rounded-full border border-zinc-700 bg-zinc-800" />
           )}
         </>
       ) : (
@@ -324,7 +321,7 @@ function TeamBadge({
               className="h-10 w-10 rounded-full bg-white object-contain p-1"
             />
           ) : (
-            <div className="h-10 w-10 rounded-full bg-zinc-800 border border-zinc-700" />
+            <div className="h-10 w-10 rounded-full border border-zinc-700 bg-zinc-800" />
           )}
           <div>
             <div className="font-semibold text-white">{team?.name || "Unknown team"}</div>
@@ -389,7 +386,7 @@ function FormList({
                 className="flex items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
               >
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-white truncate">
+                  <div className="truncate text-sm font-medium text-white">
                     {isHome ? "vs" : "at"} {opponent}
                   </div>
                   <div className="text-xs text-zinc-400">
@@ -561,7 +558,7 @@ export default async function MatchDetailsPage({ params }: PageProps) {
               </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
-                <div className="text-sm font-semibold text-white text-right">
+                <div className="text-right text-sm font-semibold text-white">
                   {awayTeam?.name || "Away team"}
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -595,19 +592,19 @@ export default async function MatchDetailsPage({ params }: PageProps) {
             ) : (
               <div className="mt-4 space-y-4">
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
                     <div className="text-xs uppercase tracking-wide text-zinc-400">Outcome</div>
                     <div className="mt-2 text-xl font-semibold text-white">
                       {resultLabel(prediction.predicted_result)}
                     </div>
                   </div>
-                  <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
                     <div className="text-xs uppercase tracking-wide text-zinc-400">Confidence</div>
                     <div className="mt-2 text-xl font-semibold text-white">
                       {prediction.confidence_label || prediction.confidence || "Medium"}
                     </div>
                   </div>
-                  <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
                     <div className="text-xs uppercase tracking-wide text-zinc-400">
                       Predicted score
                     </div>
@@ -618,7 +615,7 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
+                <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
                   <PercentBar label={`${homeTeam?.name || "Home"} win`} value={prediction.home_win_pct} />
                   <PercentBar label="Draw" value={prediction.draw_pct} />
                   <PercentBar label={`${awayTeam?.name || "Away"} win`} value={prediction.away_win_pct} />
@@ -636,7 +633,7 @@ export default async function MatchDetailsPage({ params }: PageProps) {
 
         <div className="mt-6 grid gap-6 xl:grid-cols-3">
           <div className="xl:col-span-1">
-            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 h-full">
+            <section className="h-full rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
               <h2 className="text-lg font-semibold text-white">Head-to-head</h2>
               <p className="mt-1 text-sm text-zinc-400">
                 Last {MAX_H2H} completed meetings before this fixture.
@@ -655,7 +652,7 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-medium text-white truncate">
+                          <div className="truncate text-sm font-medium text-white">
                             {teamMap[game.home_team_id || ""]?.name || "Home"} vs{" "}
                             {teamMap[game.away_team_id || ""]?.name || "Away"}
                           </div>
