@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
@@ -11,38 +11,37 @@ type PageProps = {
 type TeamRow = {
   id: string;
   name: string | null;
-  logo: string | null;
+  crest: string | null;
 };
 
 type FixtureRow = {
   id: string;
-  fixture_api_id?: number | null;
+  provider_match_id?: number | null;
   league_code?: string | null;
   season?: number | null;
-  status_short?: string | null;
-  status_long?: string | null;
-  match_date?: string | null;
-  venue_name?: string | null;
+  status?: string | null;
+  utc_date?: string | null;
   home_team_id?: string | null;
   away_team_id?: string | null;
-  home_goals?: number | null;
-  away_goals?: number | null;
+  home_score?: number | null;
+  away_score?: number | null;
 };
 
 type PredictionRow = {
-  id: string;
   fixture_id: string;
-  predicted_outcome?: string | null;
-  confidence?: number | null;
+  predicted_result?: string | null;
+  confidence?: string | null;
+  confidence_label?: string | null;
+  confidence_score?: number | null;
   predicted_home_goals?: number | null;
   predicted_away_goals?: number | null;
   home_win_pct?: number | null;
   draw_pct?: number | null;
   away_win_pct?: number | null;
-  advice?: string | null;
+  explanation?: string | null;
 };
 
-const FINISHED_STATUSES = ["FT", "AET", "PEN"];
+const FINISHED_STATUSES = ["FINISHED", "FT", "AET", "PEN"];
 const MAX_RECENT = 5;
 const MAX_H2H = 5;
 
@@ -72,13 +71,13 @@ function formatDate(value?: string | null) {
 }
 
 function isFinishedMatch(fixture: FixtureRow) {
-  return !!fixture.status_short && FINISHED_STATUSES.includes(fixture.status_short);
+  return !!fixture.status && FINISHED_STATUSES.includes(fixture.status);
 }
 
 function getOutcomeForTeam(fixture: FixtureRow, teamId: string) {
   const isHome = fixture.home_team_id === teamId;
-  const gf = isHome ? fixture.home_goals ?? 0 : fixture.away_goals ?? 0;
-  const ga = isHome ? fixture.away_goals ?? 0 : fixture.home_goals ?? 0;
+  const gf = isHome ? fixture.home_score ?? 0 : fixture.away_score ?? 0;
+  const ga = isHome ? fixture.away_score ?? 0 : fixture.home_score ?? 0;
 
   if (gf > ga) return "W";
   if (gf < ga) return "L";
@@ -99,8 +98,8 @@ function getOpponentName(fixture: FixtureRow, teamId: string, teamMap: Record<st
 
 function getScorelineFromTeamView(fixture: FixtureRow, teamId: string) {
   const isHome = fixture.home_team_id === teamId;
-  const gf = isHome ? fixture.home_goals : fixture.away_goals;
-  const ga = isHome ? fixture.away_goals : fixture.home_goals;
+  const gf = isHome ? fixture.home_score : fixture.away_score;
+  const ga = isHome ? fixture.away_score : fixture.home_score;
   return `${gf ?? "-"} - ${ga ?? "-"}`;
 }
 
@@ -114,8 +113,8 @@ function summariseForm(fixtures: FixtureRow[], teamId: string) {
   for (const fixture of fixtures) {
     const result = getOutcomeForTeam(fixture, teamId);
     const isHome = fixture.home_team_id === teamId;
-    const gf = isHome ? fixture.home_goals ?? 0 : fixture.away_goals ?? 0;
-    const ga = isHome ? fixture.away_goals ?? 0 : fixture.home_goals ?? 0;
+    const gf = isHome ? fixture.home_score ?? 0 : fixture.away_score ?? 0;
+    const ga = isHome ? fixture.away_score ?? 0 : fixture.home_score ?? 0;
 
     goalsFor += gf;
     goalsAgainst += ga;
@@ -128,25 +127,21 @@ function summariseForm(fixtures: FixtureRow[], teamId: string) {
   return { wins, draws, losses, goalsFor, goalsAgainst };
 }
 
-async function getFixtureById(supabase: Awaited<ReturnType<typeof createClient>>, id: string) {
+async function getFixtureById(supabase: ReturnType<typeof createClient>, id: string) {
   const { data, error } = await supabase
     .from("fixtures")
-    .select(
-      `
+    .select(`
       id,
-      fixture_api_id,
+      provider_match_id,
       league_code,
       season,
-      status_short,
-      status_long,
-      match_date,
-      venue_name,
+      status,
+      utc_date,
       home_team_id,
       away_team_id,
-      home_goals,
-      away_goals
-    `
-    )
+      home_score,
+      away_score
+    `)
     .eq("id", id)
     .single();
 
@@ -155,25 +150,24 @@ async function getFixtureById(supabase: Awaited<ReturnType<typeof createClient>>
 }
 
 async function getPredictionForFixture(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createClient>,
   fixtureId: string
 ) {
   const { data } = await supabase
     .from("predictions")
-    .select(
-      `
-      id,
+    .select(`
       fixture_id,
-      predicted_outcome,
+      predicted_result,
       confidence,
+      confidence_label,
+      confidence_score,
       predicted_home_goals,
       predicted_away_goals,
       home_win_pct,
       draw_pct,
       away_win_pct,
-      advice
-    `
-    )
+      explanation
+    `)
     .eq("fixture_id", fixtureId)
     .maybeSingle();
 
@@ -181,7 +175,7 @@ async function getPredictionForFixture(
 }
 
 async function getTeamsMap(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createClient>,
   ids: string[]
 ): Promise<Record<string, TeamRow>> {
   const uniqueIds = [...new Set(ids.filter(Boolean))];
@@ -189,7 +183,7 @@ async function getTeamsMap(
 
   const { data } = await supabase
     .from("teams")
-    .select("id, name, logo")
+    .select("id, name, crest")
     .in("id", uniqueIds);
 
   const map: Record<string, TeamRow> = {};
@@ -200,7 +194,7 @@ async function getTeamsMap(
 }
 
 async function getRecentTeamFixtures(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createClient>,
   teamId: string,
   beforeDate: string | null | undefined,
   leagueCode?: string | null,
@@ -208,28 +202,24 @@ async function getRecentTeamFixtures(
 ) {
   let query = supabase
     .from("fixtures")
-    .select(
-      `
+    .select(`
       id,
-      fixture_api_id,
+      provider_match_id,
       league_code,
       season,
-      status_short,
-      status_long,
-      match_date,
-      venue_name,
+      status,
+      utc_date,
       home_team_id,
       away_team_id,
-      home_goals,
-      away_goals
-    `
-    )
+      home_score,
+      away_score
+    `)
     .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-    .in("status_short", FINISHED_STATUSES)
-    .order("match_date", { ascending: false })
+    .in("status", FINISHED_STATUSES)
+    .order("utc_date", { ascending: false })
     .limit(MAX_RECENT);
 
-  if (beforeDate) query = query.lt("match_date", beforeDate);
+  if (beforeDate) query = query.lt("utc_date", beforeDate);
   if (leagueCode) query = query.eq("league_code", leagueCode);
   if (season) query = query.eq("season", season);
 
@@ -238,7 +228,7 @@ async function getRecentTeamFixtures(
 }
 
 async function getHeadToHeadFixtures(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createClient>,
   homeTeamId: string,
   awayTeamId: string,
   beforeDate: string | null | undefined,
@@ -247,30 +237,26 @@ async function getHeadToHeadFixtures(
 ) {
   let query = supabase
     .from("fixtures")
-    .select(
-      `
+    .select(`
       id,
-      fixture_api_id,
+      provider_match_id,
       league_code,
       season,
-      status_short,
-      status_long,
-      match_date,
-      venue_name,
+      status,
+      utc_date,
       home_team_id,
       away_team_id,
-      home_goals,
-      away_goals
-    `
-    )
+      home_score,
+      away_score
+    `)
     .or(
       `and(home_team_id.eq.${homeTeamId},away_team_id.eq.${awayTeamId}),and(home_team_id.eq.${awayTeamId},away_team_id.eq.${homeTeamId})`
     )
-    .in("status_short", FINISHED_STATUSES)
-    .order("match_date", { ascending: false })
+    .in("status", FINISHED_STATUSES)
+    .order("utc_date", { ascending: false })
     .limit(MAX_H2H);
 
-  if (beforeDate) query = query.lt("match_date", beforeDate);
+  if (beforeDate) query = query.lt("utc_date", beforeDate);
   if (leagueCode) query = query.eq("league_code", leagueCode);
   if (season) query = query.eq("season", season);
 
@@ -317,11 +303,11 @@ function TeamBadge({
           <div className="text-right">
             <div className="font-semibold text-white">{team?.name || "Unknown team"}</div>
           </div>
-          {team?.logo ? (
+          {team?.crest ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={team.logo}
-              alt={team.name || "Team logo"}
+              src={team.crest}
+              alt={team.name || "Team crest"}
               className="h-10 w-10 rounded-full bg-white object-contain p-1"
             />
           ) : (
@@ -330,11 +316,11 @@ function TeamBadge({
         </>
       ) : (
         <>
-          {team?.logo ? (
+          {team?.crest ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={team.logo}
-              alt={team.name || "Team logo"}
+              src={team.crest}
+              alt={team.name || "Team crest"}
               className="h-10 w-10 rounded-full bg-white object-contain p-1"
             />
           ) : (
@@ -407,7 +393,7 @@ function FormList({
                     {isHome ? "vs" : "at"} {opponent}
                   </div>
                   <div className="text-xs text-zinc-400">
-                    {formatDate(fixture.match_date)} • {isHome ? "Home" : "Away"}
+                    {formatDate(fixture.utc_date)} • {isHome ? "Home" : "Away"}
                   </div>
                 </div>
 
@@ -430,9 +416,20 @@ function FormList({
   );
 }
 
+function resultLabel(value?: string | null) {
+  if (value === "HOME") return "Home win";
+  if (value === "AWAY") return "Away win";
+  if (value === "DRAW") return "Draw";
+  return value || "N/A";
+}
+
 export default async function MatchDetailsPage({ params }: PageProps) {
   const { id } = await params;
-  const supabase = await createClient();
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
   const fixture = await getFixtureById(supabase, id);
   if (!fixture) notFound();
@@ -447,14 +444,14 @@ export default async function MatchDetailsPage({ params }: PageProps) {
     getRecentTeamFixtures(
       supabase,
       homeTeamId,
-      fixture.match_date,
+      fixture.utc_date,
       fixture.league_code,
       fixture.season
     ),
     getRecentTeamFixtures(
       supabase,
       awayTeamId,
-      fixture.match_date,
+      fixture.utc_date,
       fixture.league_code,
       fixture.season
     ),
@@ -462,7 +459,7 @@ export default async function MatchDetailsPage({ params }: PageProps) {
       supabase,
       homeTeamId,
       awayTeamId,
-      fixture.match_date,
+      fixture.utc_date,
       fixture.league_code,
       fixture.season
     ),
@@ -512,11 +509,7 @@ export default async function MatchDetailsPage({ params }: PageProps) {
               </div>
 
               <div className="mt-3 text-sm text-zinc-300">
-                {formatDateTime(fixture.match_date)}
-              </div>
-
-              <div className="mt-1 text-sm text-zinc-500">
-                {fixture.venue_name || "Venue TBC"}
+                {formatDateTime(fixture.utc_date)}
               </div>
 
               {isFinishedMatch(fixture) ? (
@@ -525,7 +518,7 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                     Final score
                   </span>
                   <span className="text-2xl font-bold text-white">
-                    {fixture.home_goals ?? "-"} - {fixture.away_goals ?? "-"}
+                    {fixture.home_score ?? "-"} - {fixture.away_score ?? "-"}
                   </span>
                 </div>
               ) : (
@@ -605,13 +598,13 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                   <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
                     <div className="text-xs uppercase tracking-wide text-zinc-400">Outcome</div>
                     <div className="mt-2 text-xl font-semibold text-white">
-                      {prediction.predicted_outcome || "N/A"}
+                      {resultLabel(prediction.predicted_result)}
                     </div>
                   </div>
                   <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
                     <div className="text-xs uppercase tracking-wide text-zinc-400">Confidence</div>
                     <div className="mt-2 text-xl font-semibold text-white">
-                      {prediction.confidence ?? 0}%
+                      {prediction.confidence_label || prediction.confidence || "Medium"}
                     </div>
                   </div>
                   <div className="rounded-xl bg-zinc-950/60 p-4 border border-zinc-800">
@@ -631,9 +624,9 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                   <PercentBar label={`${awayTeam?.name || "Away"} win`} value={prediction.away_win_pct} />
                 </div>
 
-                {prediction.advice ? (
+                {prediction.explanation ? (
                   <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-4 text-sm text-sky-100">
-                    <span className="font-semibold">Advice:</span> {prediction.advice}
+                    <span className="font-semibold">Model note:</span> {prediction.explanation}
                   </div>
                 ) : null}
               </div>
@@ -667,11 +660,11 @@ export default async function MatchDetailsPage({ params }: PageProps) {
                             {teamMap[game.away_team_id || ""]?.name || "Away"}
                           </div>
                           <div className="text-xs text-zinc-400">
-                            {formatDate(game.match_date)}
+                            {formatDate(game.utc_date)}
                           </div>
                         </div>
                         <div className="text-sm font-semibold text-white">
-                          {game.home_goals ?? "-"} - {game.away_goals ?? "-"}
+                          {game.home_score ?? "-"} - {game.away_score ?? "-"}
                         </div>
                       </div>
                     </div>
