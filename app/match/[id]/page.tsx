@@ -41,6 +41,24 @@ type PredictionRow = {
   explanation?: string | null;
 };
 
+type TeamSnapshotRow = {
+  team_id: string;
+  league_code?: string | null;
+  season?: number | null;
+  last_5_points?: number | null;
+  last_5_wins?: number | null;
+  last_5_draws?: number | null;
+  last_5_losses?: number | null;
+  clean_sheets?: number | null;
+  failed_to_score?: number | null;
+  btts_for?: number | null;
+  over_25_for?: number | null;
+  form_score?: number | null;
+  attack_score?: number | null;
+  defence_score?: number | null;
+  overall_strength_score?: number | null;
+};
+
 const FINISHED_STATUSES = ["FINISHED", "FT", "AET", "PEN"];
 const MAX_RECENT = 5;
 const MAX_H2H = 5;
@@ -188,6 +206,21 @@ function summariseHeadToHead(
   };
 }
 
+function clampScore(value?: number | null) {
+  return Math.max(0, Math.min(100, Number(value || 0)));
+}
+
+function compareValue(
+  homeValue?: number | null,
+  awayValue?: number | null
+): "home" | "away" | "draw" {
+  const h = Number(homeValue || 0);
+  const a = Number(awayValue || 0);
+  if (h > a) return "home";
+  if (a > h) return "away";
+  return "draw";
+}
+
 async function getFixtureById(supabase: any, id: string) {
   const { data, error } = await supabase
     .from("fixtures")
@@ -230,6 +263,40 @@ async function getPredictionForFixture(supabase: any, fixtureId: string) {
     .maybeSingle();
 
   return (data as PredictionRow | null) || null;
+}
+
+async function getTeamSnapshot(
+  supabase: any,
+  teamId: string,
+  leagueCode?: string | null,
+  season?: number | null
+) {
+  let query = supabase
+    .from("team_stats_snapshot")
+    .select(`
+      team_id,
+      league_code,
+      season,
+      last_5_points,
+      last_5_wins,
+      last_5_draws,
+      last_5_losses,
+      clean_sheets,
+      failed_to_score,
+      btts_for,
+      over_25_for,
+      form_score,
+      attack_score,
+      defence_score,
+      overall_strength_score
+    `)
+    .eq("team_id", teamId);
+
+  if (leagueCode) query = query.eq("league_code", leagueCode);
+  if (season) query = query.eq("season", season);
+
+  const { data } = await query.maybeSingle();
+  return (data as TeamSnapshotRow | null) || null;
 }
 
 async function getTeamsMap(
@@ -464,6 +531,195 @@ function TeamFormSummaryCard({
   );
 }
 
+function ComparisonMetricRow({
+  label,
+  homeValue,
+  awayValue,
+  isPercent = true,
+}: {
+  label: string;
+  homeValue?: number | null;
+  awayValue?: number | null;
+  isPercent?: boolean;
+}) {
+  const winner = compareValue(homeValue, awayValue);
+  const homeDisplay = Number(homeValue || 0);
+  const awayDisplay = Number(awayValue || 0);
+
+  const homeWidth = isPercent ? clampScore(homeValue) : Math.min(100, homeDisplay * 10);
+  const awayWidth = isPercent ? clampScore(awayValue) : Math.min(100, awayDisplay * 10);
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-black/30 p-4">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <div
+          className={`text-sm font-semibold ${
+            winner === "home" ? "text-emerald-300" : "text-zinc-300"
+          }`}
+        >
+          {homeDisplay}
+        </div>
+        <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</div>
+        <div
+          className={`text-sm font-semibold ${
+            winner === "away" ? "text-cyan-300" : "text-zinc-300"
+          }`}
+        >
+          {awayDisplay}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+        <div className="h-2.5 overflow-hidden rounded-full bg-zinc-800">
+          <div
+            className="h-2.5 rounded-full bg-emerald-400"
+            style={{ width: `${homeWidth}%`, marginLeft: `${100 - homeWidth}%` }}
+          />
+        </div>
+
+        <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-600">vs</div>
+
+        <div className="h-2.5 overflow-hidden rounded-full bg-zinc-800">
+          <div
+            className="h-2.5 rounded-full bg-cyan-400"
+            style={{ width: `${awayWidth}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TeamComparisonSection({
+  homeTeam,
+  awayTeam,
+  homeSnapshot,
+  awaySnapshot,
+}: {
+  homeTeam?: TeamRow;
+  awayTeam?: TeamRow;
+  homeSnapshot: TeamSnapshotRow | null;
+  awaySnapshot: TeamSnapshotRow | null;
+}) {
+  const noData = !homeSnapshot && !awaySnapshot;
+
+  return (
+    <section className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-white">Team comparison</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Snapshot metrics from team_stats_snapshot for this league and season
+          </p>
+        </div>
+      </div>
+
+      {noData ? (
+        <div className="mt-5 rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-5 text-sm text-zinc-400">
+          No snapshot comparison data found for this match yet.
+        </div>
+      ) : (
+        <>
+          <div className="mt-5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <TeamCrest team={homeTeam} size="small" />
+              <div>
+                <div className="text-sm font-semibold text-white">
+                  {homeTeam?.name || "Home"}
+                </div>
+                <div className="text-xs text-zinc-500">Home profile</div>
+              </div>
+            </div>
+
+            <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
+              Side by side
+            </div>
+
+            <div className="flex items-center gap-3 text-right">
+              <div>
+                <div className="text-sm font-semibold text-white">
+                  {awayTeam?.name || "Away"}
+                </div>
+                <div className="text-xs text-zinc-500">Away profile</div>
+              </div>
+              <TeamCrest team={awayTeam} size="small" />
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            <ComparisonMetricRow
+              label="Overall strength"
+              homeValue={homeSnapshot?.overall_strength_score}
+              awayValue={awaySnapshot?.overall_strength_score}
+            />
+            <ComparisonMetricRow
+              label="Form score"
+              homeValue={homeSnapshot?.form_score}
+              awayValue={awaySnapshot?.form_score}
+            />
+            <ComparisonMetricRow
+              label="Attack score"
+              homeValue={homeSnapshot?.attack_score}
+              awayValue={awaySnapshot?.attack_score}
+            />
+            <ComparisonMetricRow
+              label="Defence score"
+              homeValue={homeSnapshot?.defence_score}
+              awayValue={awaySnapshot?.defence_score}
+            />
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <StatMiniCard
+              label="Home last 5 pts"
+              value={homeSnapshot?.last_5_points ?? 0}
+            />
+            <StatMiniCard
+              label="Away last 5 pts"
+              value={awaySnapshot?.last_5_points ?? 0}
+            />
+            <StatMiniCard
+              label="Home last 5"
+              value={`${homeSnapshot?.last_5_wins ?? 0}-${homeSnapshot?.last_5_draws ?? 0}-${homeSnapshot?.last_5_losses ?? 0}`}
+            />
+            <StatMiniCard
+              label="Away last 5"
+              value={`${awaySnapshot?.last_5_wins ?? 0}-${awaySnapshot?.last_5_draws ?? 0}-${awaySnapshot?.last_5_losses ?? 0}`}
+            />
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <ComparisonMetricRow
+              label="Clean sheets"
+              homeValue={homeSnapshot?.clean_sheets}
+              awayValue={awaySnapshot?.clean_sheets}
+              isPercent={false}
+            />
+            <ComparisonMetricRow
+              label="Failed to score"
+              homeValue={homeSnapshot?.failed_to_score}
+              awayValue={awaySnapshot?.failed_to_score}
+              isPercent={false}
+            />
+            <ComparisonMetricRow
+              label="BTTS for"
+              homeValue={homeSnapshot?.btts_for}
+              awayValue={awaySnapshot?.btts_for}
+              isPercent={false}
+            />
+            <ComparisonMetricRow
+              label="Over 2.5 for"
+              homeValue={homeSnapshot?.over_25_for}
+              awayValue={awaySnapshot?.over_25_for}
+              isPercent={false}
+            />
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function FormList({
   title,
   fixtures,
@@ -549,7 +805,15 @@ export default async function MatchDetailsPage({ params }: PageProps) {
 
   if (!homeTeamId || !awayTeamId) notFound();
 
-  const [prediction, homeRecent, awayRecent, h2h, initialTeamMap] = await Promise.all([
+  const [
+    prediction,
+    homeRecent,
+    awayRecent,
+    h2h,
+    initialTeamMap,
+    homeSnapshot,
+    awaySnapshot,
+  ] = await Promise.all([
     getPredictionForFixture(supabase, fixture.id),
     getRecentTeamFixtures(
       supabase,
@@ -574,6 +838,8 @@ export default async function MatchDetailsPage({ params }: PageProps) {
       fixture.season
     ),
     getTeamsMap(supabase, [homeTeamId, awayTeamId]),
+    getTeamSnapshot(supabase, homeTeamId, fixture.league_code, fixture.season),
+    getTeamSnapshot(supabase, awayTeamId, fixture.league_code, fixture.season),
   ]);
 
   const extraTeamIds = [
@@ -679,6 +945,15 @@ export default async function MatchDetailsPage({ params }: PageProps) {
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           <TeamFormSummaryCard team={homeTeam} fixtures={homeRecent} teamId={homeTeamId} />
           <TeamFormSummaryCard team={awayTeam} fixtures={awayRecent} teamId={awayTeamId} />
+        </div>
+
+        <div className="mt-6">
+          <TeamComparisonSection
+            homeTeam={homeTeam}
+            awayTeam={awayTeam}
+            homeSnapshot={homeSnapshot}
+            awaySnapshot={awaySnapshot}
+          />
         </div>
 
         <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
