@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 type PageProps = {
   searchParams?: Promise<{
     slip?: string | string[] | undefined;
+    premium?: string | string[] | undefined;
   }>;
 };
 
@@ -360,28 +361,20 @@ function buildPickOfTheDay(
           `${selection.homeName} lead the model at ${homeWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point outcome edge.`
         );
         if (numberValue(homeSnapshot?.overall_strength_score) > numberValue(awaySnapshot?.overall_strength_score)) {
-          bullets.push(
-            `${selection.homeName} also have the stronger overall strength profile.`
-          );
+          bullets.push(`${selection.homeName} also have the stronger overall strength profile.`);
         }
         if (numberValue(homeSnapshot?.last_5_points) > numberValue(awaySnapshot?.last_5_points)) {
-          bullets.push(
-            `${selection.homeName} come in with stronger recent form over the last five matches.`
-          );
+          bullets.push(`${selection.homeName} come in with stronger recent form over the last five matches.`);
         }
       } else if (prediction.predicted_result === "AWAY") {
         bullets.push(
           `${selection.awayName} lead the model at ${awayWin.toFixed(1)}% with a ${probabilityEdge.toFixed(1)}-point outcome edge.`
         );
         if (numberValue(awaySnapshot?.overall_strength_score) > numberValue(homeSnapshot?.overall_strength_score)) {
-          bullets.push(
-            `${selection.awayName} also have the stronger overall strength profile.`
-          );
+          bullets.push(`${selection.awayName} also have the stronger overall strength profile.`);
         }
         if (numberValue(awaySnapshot?.last_5_points) > numberValue(homeSnapshot?.last_5_points)) {
-          bullets.push(
-            `${selection.awayName} come in with stronger recent form over the last five matches.`
-          );
+          bullets.push(`${selection.awayName} come in with stronger recent form over the last five matches.`);
         }
       } else {
         bullets.push(`The model is not strongly separating either side in this match.`);
@@ -416,9 +409,25 @@ function normaliseSlipIds(raw?: string | string[]) {
     .filter(Boolean);
 }
 
-function buildSlipHref(ids: string[]) {
-  if (!ids.length) return "/";
-  return `/?slip=${ids.join(",")}`;
+function isPremiumEnabled(raw?: string | string[]) {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) return false;
+  return ["1", "true", "premium", "pro", "yes", "on"].includes(value.toLowerCase());
+}
+
+function buildHref(ids: string[], premiumEnabled: boolean) {
+  const params: string[] = [];
+  if (ids.length) params.push(`slip=${ids.join(",")}`);
+  if (premiumEnabled) params.push(`premium=1`);
+  return params.length ? `/?${params.join("&")}` : "/";
+}
+
+function buildPremiumHref(ids: string[]) {
+  return buildHref(ids, true);
+}
+
+function buildFreeHref(ids: string[]) {
+  return buildHref(ids, false);
 }
 
 function addSlipId(currentIds: string[], id: string) {
@@ -441,9 +450,68 @@ function slipStrengthLabel(avgScore: number) {
   return "Risky";
 }
 
+function LockCard({
+  title,
+  text,
+  upgradeHref,
+}: {
+  title: string;
+  text: string;
+  upgradeHref: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "linear-gradient(135deg, #0f172a 0%, #334155 100%)",
+        color: "#ffffff",
+        borderRadius: "18px",
+        padding: "18px",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "8px",
+          background: "rgba(255,255,255,0.12)",
+          borderRadius: "999px",
+          padding: "6px 10px",
+          fontSize: "11px",
+          fontWeight: 800,
+          marginBottom: "10px",
+        }}
+      >
+        🔒 Premium
+      </div>
+      <div style={{ fontSize: "18px", fontWeight: 800, marginBottom: "8px" }}>{title}</div>
+      <div style={{ fontSize: "14px", lineHeight: 1.6, color: "#cbd5e1", marginBottom: "14px" }}>
+        {text}
+      </div>
+      <Link
+        href={upgradeHref}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          textDecoration: "none",
+          background: "#f59e0b",
+          color: "#111827",
+          borderRadius: "999px",
+          padding: "10px 14px",
+          fontSize: "12px",
+          fontWeight: 900,
+        }}
+      >
+        Upgrade to Premium
+      </Link>
+    </div>
+  );
+}
+
 export default async function HomePage({ searchParams }: PageProps) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const selectedSlipIds = normaliseSlipIds(resolvedSearchParams?.slip);
+  const premiumEnabled = isPremiumEnabled(resolvedSearchParams?.premium);
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -565,8 +633,7 @@ export default async function HomePage({ searchParams }: PageProps) {
 
   const strongestTeam = firstTeamName(typedSnapshots[0]?.team, "-");
   const highConfidenceCount = selections.filter((p) => p.confidenceLabel === "High").length;
-  const avgConfidence =
-    selections.length > 0 ? average(selections.map((p) => p.score)) : 0;
+  const avgConfidence = selections.length > 0 ? average(selections.map((p) => p.score)) : 0;
   const avgHomeWinPct =
     upcomingPredictions.length > 0
       ? upcomingPredictions.reduce((sum, p) => sum + Number(p.home_win_pct || 0), 0) /
@@ -577,10 +644,8 @@ export default async function HomePage({ searchParams }: PageProps) {
   const selectedSlip = selections.filter((item) => selectedSlipIds.includes(item.fixtureId));
 
   const totalSlipScore = average(selectedSlip.map((item) => item.score));
-  const slipConfidence =
-    totalSlipScore >= 82 ? "High" : totalSlipScore >= 68 ? "Medium" : "Low";
-  const slipRisk =
-    totalSlipScore >= 82 ? "Low" : totalSlipScore >= 68 ? "Medium" : "High";
+  const slipConfidence = totalSlipScore >= 82 ? "High" : totalSlipScore >= 68 ? "Medium" : "Low";
+  const slipRisk = totalSlipScore >= 82 ? "Low" : totalSlipScore >= 68 ? "Medium" : "High";
 
   const suggestedTwoLeg = selections.slice(0, 2);
   const suggestedThreeLeg = selections.slice(0, 3);
@@ -635,32 +700,134 @@ export default async function HomePage({ searchParams }: PageProps) {
               </h1>
 
               <p style={{ margin: 0, color: "#dbeafe", fontSize: "15px", lineHeight: 1.6 }}>
-                AI-driven match projections using fixture data, standings, team form,
-                snapshot strength scores, venue splits, and a rule-based betting insights layer.
+                AI-driven match projections using fixture data, standings, team form, snapshot
+                strength scores, venue splits, and a rule-based betting insights layer.
               </p>
             </div>
 
             <div
               style={{
-                minWidth: "260px",
-                background: "rgba(255,255,255,0.1)",
-                border: "1px solid rgba(255,255,255,0.16)",
+                minWidth: "280px",
+                background: premiumEnabled
+                  ? "rgba(16,185,129,0.14)"
+                  : "rgba(255,255,255,0.1)",
+                border: premiumEnabled
+                  ? "1px solid rgba(52,211,153,0.35)"
+                  : "1px solid rgba(255,255,255,0.16)",
                 borderRadius: "20px",
                 padding: "18px",
               }}
             >
-              <div style={{ fontSize: "12px", color: "#bfdbfe", marginBottom: "6px" }}>
-                Strongest team by snapshot
+              <div style={{ fontSize: "12px", color: premiumEnabled ? "#a7f3d0" : "#bfdbfe", marginBottom: "6px" }}>
+                {premiumEnabled ? "Premium tier active" : "Current tier"}
               </div>
+
               <div style={{ fontSize: "28px", fontWeight: 800, marginBottom: "8px" }}>
-                {strongestTeam}
+                {premiumEnabled ? "Premium" : "Free"}
               </div>
-              <div style={{ fontSize: "12px", color: "#dbeafe" }}>
-                Ranked by overall strength score
+
+              <div style={{ fontSize: "12px", color: premiumEnabled ? "#d1fae5" : "#dbeafe", marginBottom: "12px" }}>
+                {premiumEnabled
+                  ? "3-leg builder, full slip grading, advanced scoring, and full pick reasoning unlocked"
+                  : "Upgrade to unlock full slip grading, 3-leg suggestions, and premium insights"}
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                {!premiumEnabled ? (
+                  <Link
+                    href={buildPremiumHref(selectedSlipIds)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      textDecoration: "none",
+                      background: "#f59e0b",
+                      color: "#111827",
+                      borderRadius: "999px",
+                      padding: "10px 14px",
+                      fontSize: "12px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    Upgrade
+                  </Link>
+                ) : null}
+
+                {premiumEnabled ? (
+                  <Link
+                    href={buildFreeHref(selectedSlipIds)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      textDecoration: "none",
+                      background: "rgba(255,255,255,0.12)",
+                      color: "#ffffff",
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      borderRadius: "999px",
+                      padding: "10px 14px",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    View free tier
+                  </Link>
+                ) : null}
               </div>
             </div>
           </div>
         </section>
+
+        {!premiumEnabled && (
+          <section
+            style={{
+              background: "#fff7ed",
+              border: "1px solid #fdba74",
+              borderRadius: "22px",
+              padding: "18px",
+              marginBottom: "24px",
+              boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "16px",
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "12px", fontWeight: 800, color: "#9a3412", marginBottom: "6px" }}>
+                  PREMIUM GATE
+                </div>
+                <div style={{ fontSize: "20px", fontWeight: 900, color: "#111827", marginBottom: "6px" }}>
+                  Unlock advanced betting tools
+                </div>
+                <div style={{ fontSize: "14px", color: "#7c2d12", lineHeight: 1.6 }}>
+                  Premium unlocks full pick reasoning, live slip scoring, confidence and risk grading,
+                  and the suggested 3-leg builder.
+                </div>
+              </div>
+
+              <Link
+                href={buildPremiumHref(selectedSlipIds)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  textDecoration: "none",
+                  background: "#111827",
+                  color: "#ffffff",
+                  borderRadius: "999px",
+                  padding: "12px 16px",
+                  fontSize: "13px",
+                  fontWeight: 900,
+                }}
+              >
+                Go Premium
+              </Link>
+            </div>
+          </section>
+        )}
 
         {pickOfTheDay && (
           <section
@@ -752,41 +919,51 @@ export default async function HomePage({ searchParams }: PageProps) {
                 </div>
 
                 <div style={{ display: "grid", gap: "12px", marginBottom: "18px" }}>
-                  {pickOfTheDay.bullets.map((bullet, index) => (
-                    <div
-                      key={`${index}-${bullet}`}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "28px 1fr",
-                        gap: "12px",
-                        alignItems: "start",
-                        background: "#f8fafc",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "16px",
-                        padding: "12px 14px",
-                      }}
-                    >
+                  {(premiumEnabled ? pickOfTheDay.bullets : pickOfTheDay.bullets.slice(0, 1)).map(
+                    (bullet, index) => (
                       <div
+                        key={`${index}-${bullet}`}
                         style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: "999px",
-                          background: "#dbeafe",
-                          color: "#1d4ed8",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "12px",
-                          fontWeight: 800,
+                          display: "grid",
+                          gridTemplateColumns: "28px 1fr",
+                          gap: "12px",
+                          alignItems: "start",
+                          background: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "16px",
+                          padding: "12px 14px",
                         }}
                       >
-                        {index + 1}
+                        <div
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: "999px",
+                            background: "#dbeafe",
+                            color: "#1d4ed8",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "12px",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {index + 1}
+                        </div>
+                        <div style={{ fontSize: "14px", lineHeight: 1.6, color: "#334155" }}>
+                          {bullet}
+                        </div>
                       </div>
-                      <div style={{ fontSize: "14px", lineHeight: 1.6, color: "#334155" }}>
-                        {bullet}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  )}
+
+                  {!premiumEnabled && (
+                    <LockCard
+                      title="Full pick reasoning locked"
+                      text="Premium unlocks the full reasoning stack behind Pick of the Day, including extra support points and stronger edge context."
+                      upgradeHref={buildPremiumHref(selectedSlipIds)}
+                    />
+                  )}
                 </div>
 
                 <Link
@@ -813,13 +990,17 @@ export default async function HomePage({ searchParams }: PageProps) {
                 {[
                   {
                     label: "Confidence",
-                    value: pickOfTheDay.confidenceLabel,
-                    tone: confidenceTone(pickOfTheDay.confidenceLabel),
+                    value: premiumEnabled ? pickOfTheDay.confidenceLabel : "Premium",
+                    tone: premiumEnabled
+                      ? confidenceTone(pickOfTheDay.confidenceLabel)
+                      : { bg: "#f8fafc", text: "#475569", border: "#cbd5e1" },
                   },
                   {
                     label: "Risk",
-                    value: pickOfTheDay.riskLabel,
-                    tone: riskTone(pickOfTheDay.riskLabel),
+                    value: premiumEnabled ? pickOfTheDay.riskLabel : "Premium",
+                    tone: premiumEnabled
+                      ? riskTone(pickOfTheDay.riskLabel)
+                      : { bg: "#f8fafc", text: "#475569", border: "#cbd5e1" },
                   },
                   {
                     label: "Model lean",
@@ -843,12 +1024,10 @@ export default async function HomePage({ searchParams }: PageProps) {
                   },
                   {
                     label: "Slate score",
-                    value: pickOfTheDay.score.toFixed(1),
-                    tone: {
-                      bg: "#ecfeff",
-                      text: "#0f766e",
-                      border: "#99f6e4",
-                    },
+                    value: premiumEnabled ? pickOfTheDay.score.toFixed(1) : "Premium",
+                    tone: premiumEnabled
+                      ? { bg: "#ecfeff", text: "#0f766e", border: "#99f6e4" }
+                      : { bg: "#f8fafc", text: "#475569", border: "#cbd5e1" },
                   },
                 ].map((card) => (
                   <div
@@ -954,7 +1133,9 @@ export default async function HomePage({ searchParams }: PageProps) {
                 </div>
                 <div style={{ fontSize: "13px", color: "#d1fae5" }}>
                   {selectedSlip.length
-                    ? `${slipStrengthLabel(totalSlipScore)} build • ${slipConfidence} confidence`
+                    ? premiumEnabled
+                      ? `${slipStrengthLabel(totalSlipScore)} build • ${slipConfidence} confidence`
+                      : "Upgrade to unlock full slip grading"
                     : "No selections added yet"}
                 </div>
               </div>
@@ -1038,7 +1219,7 @@ export default async function HomePage({ searchParams }: PageProps) {
                           </div>
 
                           <Link
-                            href={buildSlipHref(removeSlipId(selectedSlipIds, item.fixtureId))}
+                            href={buildHref(removeSlipId(selectedSlipIds, item.fixtureId), premiumEnabled)}
                             style={{
                               textDecoration: "none",
                               background: "#ffffff",
@@ -1076,54 +1257,72 @@ export default async function HomePage({ searchParams }: PageProps) {
                             <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.angle}</div>
                           </div>
 
-                          <div
-                            style={{
-                              background: confidence.bg,
-                              border: `1px solid ${confidence.border}`,
-                              borderRadius: "16px",
-                              padding: "12px",
-                              color: confidence.text,
-                            }}
-                          >
-                            <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
-                              Confidence
-                            </div>
-                            <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.confidenceLabel}</div>
-                          </div>
+                          {premiumEnabled ? (
+                            <>
+                              <div
+                                style={{
+                                  background: confidence.bg,
+                                  border: `1px solid ${confidence.border}`,
+                                  borderRadius: "16px",
+                                  padding: "12px",
+                                  color: confidence.text,
+                                }}
+                              >
+                                <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                                  Confidence
+                                </div>
+                                <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.confidenceLabel}</div>
+                              </div>
 
-                          <div
-                            style={{
-                              background: risk.bg,
-                              border: `1px solid ${risk.border}`,
-                              borderRadius: "16px",
-                              padding: "12px",
-                              color: risk.text,
-                            }}
-                          >
-                            <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
-                              Risk
-                            </div>
-                            <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.riskLabel}</div>
-                          </div>
+                              <div
+                                style={{
+                                  background: risk.bg,
+                                  border: `1px solid ${risk.border}`,
+                                  borderRadius: "16px",
+                                  padding: "12px",
+                                  color: risk.text,
+                                }}
+                              >
+                                <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                                  Risk
+                                </div>
+                                <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.riskLabel}</div>
+                              </div>
 
-                          <div
-                            style={{
-                              background: "#ecfeff",
-                              border: "1px solid #99f6e4",
-                              borderRadius: "16px",
-                              padding: "12px",
-                              color: "#0f766e",
-                            }}
-                          >
-                            <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
-                              Selection score
+                              <div
+                                style={{
+                                  background: "#ecfeff",
+                                  border: "1px solid #99f6e4",
+                                  borderRadius: "16px",
+                                  padding: "12px",
+                                  color: "#0f766e",
+                                }}
+                              >
+                                <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                                  Selection score
+                                </div>
+                                <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.score.toFixed(1)}</div>
+                              </div>
+                            </>
+                          ) : (
+                            <div
+                              style={{
+                                gridColumn: "span 3",
+                              }}
+                            >
+                              <LockCard
+                                title="Slip grading locked"
+                                text="Premium unlocks per-leg score, confidence, and risk grading across your full bet slip."
+                                upgradeHref={buildPremiumHref(selectedSlipIds)}
+                              />
                             </div>
-                            <div style={{ fontSize: "22px", fontWeight: 900 }}>{item.score.toFixed(1)}</div>
-                          </div>
+                          )}
                         </div>
 
                         <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.6 }}>
-                          {item.shortReason}
+                          {premiumEnabled
+                            ? item.shortReason
+                            : "Premium unlocks the full reasoning summary for each slip leg."}
                         </div>
                       </div>
                     );
@@ -1146,93 +1345,111 @@ export default async function HomePage({ searchParams }: PageProps) {
                   Slip totals
                 </div>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: "12px",
-                    marginBottom: "14px",
-                  }}
-                >
-                  <div
-                    style={{
-                      background: "#f8fafc",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "16px",
-                      padding: "12px",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>Legs</div>
-                    <div style={{ fontSize: "24px", fontWeight: 900 }}>{selectedSlip.length}</div>
-                  </div>
+                {premiumEnabled ? (
+                  <>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: "12px",
+                        marginBottom: "14px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "16px",
+                          padding: "12px",
+                        }}
+                      >
+                        <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>
+                          Legs
+                        </div>
+                        <div style={{ fontSize: "24px", fontWeight: 900 }}>{selectedSlip.length}</div>
+                      </div>
 
-                  <div
-                    style={{
-                      background: "#f8fafc",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "16px",
-                      padding: "12px",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>
-                      Avg score
-                    </div>
-                    <div style={{ fontSize: "24px", fontWeight: 900 }}>
-                      {selectedSlip.length ? totalSlipScore.toFixed(1) : "-"}
-                    </div>
-                  </div>
+                      <div
+                        style={{
+                          background: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "16px",
+                          padding: "12px",
+                        }}
+                      >
+                        <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>
+                          Avg score
+                        </div>
+                        <div style={{ fontSize: "24px", fontWeight: 900 }}>
+                          {selectedSlip.length ? totalSlipScore.toFixed(1) : "-"}
+                        </div>
+                      </div>
 
-                  <div
-                    style={{
-                      background: confidenceTone(slipConfidence).bg,
-                      border: `1px solid ${confidenceTone(slipConfidence).border}`,
-                      borderRadius: "16px",
-                      padding: "12px",
-                      color: confidenceTone(slipConfidence).text,
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
-                      Slip confidence
-                    </div>
-                    <div style={{ fontSize: "24px", fontWeight: 900 }}>{selectedSlip.length ? slipConfidence : "-"}</div>
-                  </div>
+                      <div
+                        style={{
+                          background: confidenceTone(slipConfidence).bg,
+                          border: `1px solid ${confidenceTone(slipConfidence).border}`,
+                          borderRadius: "16px",
+                          padding: "12px",
+                          color: confidenceTone(slipConfidence).text,
+                        }}
+                      >
+                        <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                          Slip confidence
+                        </div>
+                        <div style={{ fontSize: "24px", fontWeight: 900 }}>
+                          {selectedSlip.length ? slipConfidence : "-"}
+                        </div>
+                      </div>
 
-                  <div
-                    style={{
-                      background: riskTone(slipRisk).bg,
-                      border: `1px solid ${riskTone(slipRisk).border}`,
-                      borderRadius: "16px",
-                      padding: "12px",
-                      color: riskTone(slipRisk).text,
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
-                      Slip risk
+                      <div
+                        style={{
+                          background: riskTone(slipRisk).bg,
+                          border: `1px solid ${riskTone(slipRisk).border}`,
+                          borderRadius: "16px",
+                          padding: "12px",
+                          color: riskTone(slipRisk).text,
+                        }}
+                      >
+                        <div style={{ fontSize: "12px", marginBottom: "6px", fontWeight: 700 }}>
+                          Slip risk
+                        </div>
+                        <div style={{ fontSize: "24px", fontWeight: 900 }}>
+                          {selectedSlip.length ? slipRisk : "-"}
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ fontSize: "24px", fontWeight: 900 }}>{selectedSlip.length ? slipRisk : "-"}</div>
-                  </div>
-                </div>
 
-                <div
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "16px",
-                    padding: "14px",
-                    fontSize: "14px",
-                    lineHeight: 1.6,
-                    color: "#334155",
-                  }}
-                >
-                  {selectedSlip.length
-                    ? `This ${selectedSlip.length}-leg slip grades as ${slipStrengthLabel(totalSlipScore).toLowerCase()} based on the average selection score across your chosen angles.`
-                    : "No active selections yet."}
-                </div>
+                    <div
+                      style={{
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "16px",
+                        padding: "14px",
+                        fontSize: "14px",
+                        lineHeight: 1.6,
+                        color: "#334155",
+                      }}
+                    >
+                      {selectedSlip.length
+                        ? `This ${selectedSlip.length}-leg slip grades as ${slipStrengthLabel(
+                            totalSlipScore
+                          ).toLowerCase()} based on the average selection score across your chosen angles.`
+                        : "No active selections yet."}
+                    </div>
+                  </>
+                ) : (
+                  <LockCard
+                    title="Full slip totals locked"
+                    text="Premium unlocks average slip score, slip confidence, slip risk, and the final build grading for your selected legs."
+                    upgradeHref={buildPremiumHref(selectedSlipIds)}
+                  />
+                )}
 
                 {selectedSlip.length > 0 && (
                   <div style={{ marginTop: "14px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
                     <Link
-                      href="/"
+                      href={premiumEnabled ? buildFreeHref([]) : "/"}
                       style={{
                         textDecoration: "none",
                         background: "#ffffff",
@@ -1247,7 +1464,7 @@ export default async function HomePage({ searchParams }: PageProps) {
                       Clear slip
                     </Link>
 
-                    {selectedSlip.length >= 2 && (
+                    {selectedSlip.length >= 2 && premiumEnabled && (
                       <div
                         style={{
                           background: "#dcfce7",
@@ -1281,7 +1498,7 @@ export default async function HomePage({ searchParams }: PageProps) {
 
                 <div style={{ display: "grid", gap: "12px" }}>
                   <Link
-                    href={buildSlipHref(suggestedTwoLeg.map((item) => item.fixtureId))}
+                    href={buildHref(suggestedTwoLeg.map((item) => item.fixtureId), premiumEnabled)}
                     style={{
                       textDecoration: "none",
                       background: "#eff6ff",
@@ -1297,32 +1514,36 @@ export default async function HomePage({ searchParams }: PageProps) {
                     <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "4px" }}>
                       {suggestedTwoLeg.map((item) => item.angle).join(" + ") || "Not available"}
                     </div>
-                    <div style={{ fontSize: "13px" }}>
-                      Best two selections by model score
-                    </div>
+                    <div style={{ fontSize: "13px" }}>Best two selections by model score</div>
                   </Link>
 
-                  <Link
-                    href={buildSlipHref(suggestedThreeLeg.map((item) => item.fixtureId))}
-                    style={{
-                      textDecoration: "none",
-                      background: "#ecfeff",
-                      border: "1px solid #99f6e4",
-                      color: "#0f766e",
-                      borderRadius: "16px",
-                      padding: "14px",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", fontWeight: 800, marginBottom: "6px" }}>
-                      Suggested 3-leg slip
-                    </div>
-                    <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "4px" }}>
-                      {suggestedThreeLeg.map((item) => item.angle).join(" + ") || "Not available"}
-                    </div>
-                    <div style={{ fontSize: "13px" }}>
-                      Best three selections by model score
-                    </div>
-                  </Link>
+                  {premiumEnabled ? (
+                    <Link
+                      href={buildHref(suggestedThreeLeg.map((item) => item.fixtureId), true)}
+                      style={{
+                        textDecoration: "none",
+                        background: "#ecfeff",
+                        border: "1px solid #99f6e4",
+                        color: "#0f766e",
+                        borderRadius: "16px",
+                        padding: "14px",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", fontWeight: 800, marginBottom: "6px" }}>
+                        Suggested 3-leg slip
+                      </div>
+                      <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "4px" }}>
+                        {suggestedThreeLeg.map((item) => item.angle).join(" + ") || "Not available"}
+                      </div>
+                      <div style={{ fontSize: "13px" }}>Best three selections by model score</div>
+                    </Link>
+                  ) : (
+                    <LockCard
+                      title="Suggested 3-leg slip locked"
+                      text="Premium unlocks the higher-value 3-leg quick build from your top-ranked selections."
+                      upgradeHref={buildPremiumHref(selectedSlipIds)}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -1351,12 +1572,12 @@ export default async function HomePage({ searchParams }: PageProps) {
             {
               label: "High-confidence picks",
               value: highConfidenceCount,
-              sub: "Current visible set",
+              sub: premiumEnabled ? "Full scoring enabled" : "Free tier preview",
             },
             {
-              label: "Avg selection score",
-              value: avgConfidence ? avgConfidence.toFixed(1) : "0.0",
-              sub: "Across visible predictions",
+              label: premiumEnabled ? "Avg selection score" : "Premium score data",
+              value: premiumEnabled ? (avgConfidence ? avgConfidence.toFixed(1) : "0.0") : "Locked",
+              sub: premiumEnabled ? "Across visible predictions" : "Upgrade to unlock",
             },
             {
               label: "Avg home-win probability",
@@ -1453,7 +1674,9 @@ export default async function HomePage({ searchParams }: PageProps) {
                       padding: "18px",
                       borderRadius: "22px",
                       background: inSlip ? "#f0fdf4" : isPickOfDay ? "#eff6ff" : "#f9fafb",
-                      border: `1px solid ${inSlip ? "#86efac" : isPickOfDay ? "#bfdbfe" : "#e5e7eb"}`,
+                      border: `1px solid ${
+                        inSlip ? "#86efac" : isPickOfDay ? "#bfdbfe" : "#e5e7eb"
+                      }`,
                       boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
                     }}
                   >
@@ -1468,7 +1691,14 @@ export default async function HomePage({ searchParams }: PageProps) {
                       }}
                     >
                       <div>
-                        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "10px",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                          }}
+                        >
                           <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "5px" }}>
                             {homeName} v {awayName}
                           </div>
@@ -1528,8 +1758,8 @@ export default async function HomePage({ searchParams }: PageProps) {
                           <Link
                             href={
                               inSlip
-                                ? buildSlipHref(removeSlipId(selectedSlipIds, prediction.fixture_id))
-                                : buildSlipHref(addSlipId(selectedSlipIds, prediction.fixture_id))
+                                ? buildHref(removeSlipId(selectedSlipIds, prediction.fixture_id), premiumEnabled)
+                                : buildHref(addSlipId(selectedSlipIds, prediction.fixture_id), premiumEnabled)
                             }
                             style={{
                               textDecoration: "none",
@@ -1591,11 +1821,11 @@ export default async function HomePage({ searchParams }: PageProps) {
                         <div style={{ fontSize: "14px", color: "#374151", marginBottom: "8px" }}>
                           Lean: <strong>{resultLabel(prediction.predicted_result)}</strong>
                         </div>
-                        {selection && (
+                        {selection ? (
                           <div style={{ fontSize: "14px", color: "#0f766e", fontWeight: 800 }}>
                             Slip angle: {selection.angle}
                           </div>
-                        )}
+                        ) : null}
                       </div>
 
                       <div
@@ -1652,7 +1882,7 @@ export default async function HomePage({ searchParams }: PageProps) {
                         </div>
                       ))}
 
-                      {selection && (
+                      {selection && premiumEnabled && (
                         <div
                           style={{
                             background: "#ecfeff",
@@ -1665,6 +1895,22 @@ export default async function HomePage({ searchParams }: PageProps) {
                           }}
                         >
                           Score {selection.score.toFixed(1)}
+                        </div>
+                      )}
+
+                      {selection && !premiumEnabled && (
+                        <div
+                          style={{
+                            background: "#f8fafc",
+                            color: "#475569",
+                            border: "1px solid #cbd5e1",
+                            borderRadius: "999px",
+                            padding: "7px 10px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          Premium score
                         </div>
                       )}
                     </div>
@@ -1830,9 +2076,7 @@ export default async function HomePage({ searchParams }: PageProps) {
                         marginBottom: "8px",
                       }}
                     >
-                      <div style={{ fontWeight: 800 }}>
-                        {firstTeamName(row.team, "Team")}
-                      </div>
+                      <div style={{ fontWeight: 800 }}>{firstTeamName(row.team, "Team")}</div>
                       <div
                         style={{
                           background: "#111827",
@@ -1905,9 +2149,7 @@ export default async function HomePage({ searchParams }: PageProps) {
                     <div style={{ fontWeight: 800, marginBottom: "6px" }}>
                       {firstTeamName(fixture.home, "Home")} v {firstTeamName(fixture.away, "Away")}
                     </div>
-                    <div style={{ fontSize: "13px", color: "#6b7280" }}>
-                      {formatDate(fixture.utc_date)}
-                    </div>
+                    <div style={{ fontSize: "13px", color: "#6b7280" }}>{formatDate(fixture.utc_date)}</div>
                   </div>
                 ))}
 
