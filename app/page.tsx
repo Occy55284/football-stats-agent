@@ -607,49 +607,54 @@ export default async function HomePage({
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const { data: predictions } = await supabase
-    .from("predictions")
-    .select(`
-      fixture_id,
-      predicted_result,
-      confidence,
-      confidence_label,
-      confidence_score,
-      home_win_pct,
-      draw_pct,
-      away_win_pct,
-      predicted_home_goals,
-      predicted_away_goals,
-      home_team_id,
-      away_team_id,
-      fixture:fixture_id(
-        utc_date,
-        status,
-        winner,
-        home_score,
-        away_score,
+  const nowIso = new Date().toISOString();
+
+  const [{ data: predictions }, { data: snapshots }] = await Promise.all([
+    supabase
+      .from("predictions")
+      .select(`
+        fixture_id,
+        predicted_result,
+        confidence,
+        confidence_label,
+        confidence_score,
+        home_win_pct,
+        draw_pct,
+        away_win_pct,
+        predicted_home_goals,
+        predicted_away_goals,
         home_team_id,
         away_team_id,
-        home:home_team_id(name, crest),
-        away:away_team_id(name, crest)
-      )
-    `)
-    .eq("league_code", selectedCompetition)
-    .eq("season", SEASON)
-    .order("updated_at", { ascending: false })
-    .limit(120);
+        fixture:fixture_id(
+          utc_date,
+          status,
+          winner,
+          home_score,
+          away_score,
+          home_team_id,
+          away_team_id,
+          home:home_team_id(name, crest),
+          away:away_team_id(name, crest)
+        )
+      `)
+      .eq("league_code", selectedCompetition)
+      .eq("season", SEASON)
+      .gte("fixture.utc_date", nowIso)
+      .order("updated_at", { ascending: false })
+      .limit(50),
 
-  const { data: snapshots } = await supabase
-    .from("team_stats_snapshot")
-    .select(`
-      team_id,
-      last_5_points,
-      overall_strength_score,
-      home_points_per_game,
-      away_points_per_game
-    `)
-    .eq("league_code", selectedCompetition)
-    .eq("season", SEASON);
+    supabase
+      .from("team_stats_snapshot")
+      .select(`
+        team_id,
+        last_5_points,
+        overall_strength_score,
+        home_points_per_game,
+        away_points_per_game
+      `)
+      .eq("league_code", selectedCompetition)
+      .eq("season", SEASON),
+  ]);
 
   const typedPredictions = (predictions || []) as PredictionRow[];
   const typedSnapshots = (snapshots || []) as SnapshotRow[];
@@ -659,28 +664,13 @@ export default async function HomePage({
     snapshotMap.set(row.team_id, row);
   }
 
-  const nowMs = Date.now();
-  const sevenDaysAheadMs = nowMs + 7 * 24 * 60 * 60 * 1000;
-
   const boardCards: PickCard[] = typedPredictions
     .filter((prediction) => {
       const fixtureDate = prediction.fixture?.utc_date
         ? new Date(prediction.fixture.utc_date).getTime()
         : 0;
 
-      const status = prediction.fixture?.status || "";
-      const isUpcomingStatus =
-        status === "SCHEDULED" ||
-        status === "TIMED" ||
-        status === "NS" ||
-        status === "POSTPONED";
-
-      return (
-        !!prediction.fixture_id &&
-        fixtureDate > nowMs &&
-        fixtureDate <= sevenDaysAheadMs &&
-        isUpcomingStatus
-      );
+      return !!prediction.fixture_id && fixtureDate > Date.now();
     })
     .map((prediction) => {
       const home = firstTeam(prediction.fixture?.home);
