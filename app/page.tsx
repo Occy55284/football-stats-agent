@@ -12,6 +12,8 @@ type TeamRef = {
   crest?: string | null;
 };
 
+type ResultCode = "HOME" | "DRAW" | "AWAY" | "UNKNOWN";
+
 type PredictionRow = {
   fixture_id: string | null;
   predicted_result: string | null;
@@ -66,8 +68,8 @@ type ResultCard = {
   homeCrest?: string | null;
   awayCrest?: string | null;
   kickOff: string | null;
-  predictedResult: "HOME" | "DRAW" | "AWAY" | "UNKNOWN";
-  actualResult: "HOME" | "DRAW" | "AWAY" | "UNKNOWN";
+  predictedResult: ResultCode;
+  actualResult: ResultCode;
   predictedScore: string;
   actualScore: string;
   isCorrect: boolean;
@@ -239,7 +241,7 @@ function toResultCode(
   winner?: string | null,
   homeScore?: number | null,
   awayScore?: number | null
-): "HOME" | "DRAW" | "AWAY" | "UNKNOWN" {
+): ResultCode {
   if (winner === "HOME_TEAM") return "HOME";
   if (winner === "AWAY_TEAM") return "AWAY";
   if (winner === "DRAW") return "DRAW";
@@ -253,7 +255,14 @@ function toResultCode(
   return "UNKNOWN";
 }
 
-function resultLabel(value: "HOME" | "DRAW" | "AWAY" | "UNKNOWN", homeName: string, awayName: string) {
+function toPredictedResultCode(value?: string | null): ResultCode {
+  if (value === "HOME") return "HOME";
+  if (value === "DRAW") return "DRAW";
+  if (value === "AWAY") return "AWAY";
+  return "UNKNOWN";
+}
+
+function resultLabel(value: ResultCode, homeName: string, awayName: string) {
   if (value === "HOME") return `${homeName} win`;
   if (value === "AWAY") return `${awayName} win`;
   if (value === "DRAW") return "Draw";
@@ -713,7 +722,7 @@ export default async function HomePage({
         prediction.predicted_result != null
       );
     })
-    .map((prediction) => {
+    .map((prediction): ResultCard => {
       const home = firstTeam(prediction.fixture?.home);
       const away = firstTeam(prediction.fixture?.away);
 
@@ -723,12 +732,7 @@ export default async function HomePage({
         prediction.fixture?.away_score
       );
 
-      const predictedResult =
-        prediction.predicted_result === "HOME" ||
-        prediction.predicted_result === "DRAW" ||
-        prediction.predicted_result === "AWAY"
-          ? prediction.predicted_result
-          : "UNKNOWN";
+      const predictedResult = toPredictedResultCode(prediction.predicted_result);
 
       return {
         fixtureId: prediction.fixture_id as string,
