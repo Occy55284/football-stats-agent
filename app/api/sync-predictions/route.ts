@@ -40,6 +40,11 @@ type FixtureRow = {
   utc_date?: string | null;
 };
 
+const DEFAULT_SEASON = 2025;
+const DEFAULT_COMPETITION = "PL";
+const ALLOWED_COMPETITIONS = ["PL", "ELC"] as const;
+const INCLUDED_STATUSES = ["SCHEDULED", "TIMED", "NS", "FINISHED", "FT"];
+
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -72,11 +77,42 @@ function toPct(value: number) {
   return round1(clamp(value, 0, 100));
 }
 
-export async function GET() {
+function parseCompetition(url: URL) {
+  const requested = (
+    url.searchParams.get("competition") ||
+    url.searchParams.get("league_code") ||
+    DEFAULT_COMPETITION
+  ).toUpperCase();
+
+  return ALLOWED_COMPETITIONS.includes(
+    requested as (typeof ALLOWED_COMPETITIONS)[number]
+  )
+    ? requested
+    : DEFAULT_COMPETITION;
+}
+
+function parseSeason(url: URL) {
+  const raw = Number(url.searchParams.get("season") || DEFAULT_SEASON);
+  return Number.isFinite(raw) ? raw : DEFAULT_SEASON;
+}
+
+function shouldIncludeFinished(url: URL) {
+  const raw = (url.searchParams.get("include_finished") || "true").toLowerCase();
+  return raw !== "false";
+}
+
+export async function GET(request: Request) {
   try {
     const supabase = getSupabaseAdmin();
-    const leagueCode = "PL";
-    const season = 2025;
+    const url = new URL(request.url);
+
+    const leagueCode = parseCompetition(url);
+    const season = parseSeason(url);
+    const includeFinished = shouldIncludeFinished(url);
+
+    const statuses = includeFinished
+      ? INCLUDED_STATUSES
+      : ["SCHEDULED", "TIMED", "NS"];
 
     const { data: snapshotRows, error: snapshotError } = await supabase
       .from("team_stats_snapshot")
@@ -91,22 +127,38 @@ export async function GET() {
       );
     }
 
+    const typedSnapshots = (snapshotRows || []) as SnapshotRow[];
+
+    if (typedSnapshots.length === 0) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: `No team_stats_snapshot rows found for ${leagueCode} ${season}`,
+        }),
+        { status: 400 }
+      );
+    }
+
     const snapshotMap = new Map<string, SnapshotRow>();
-    for (const row of snapshotRows || []) {
+    for (const row of typedSnapshots) {
       snapshotMap.set(
         getSnapshotKey(row.team_id, row.league_code, row.season),
         row
       );
     }
 
+    const leagueAvgGoals =
+      typedSnapshots.reduce((sum, row) => sum + safeDiv(row.goals_for, row.played), 0) /
+        typedSnapshots.length || 1.35;
+
     const { data: fixtures, error: fixturesError } = await supabase
       .from("fixtures")
       .select("id, league_code, season, home_team_id, away_team_id, status, utc_date")
       .eq("league_code", leagueCode)
       .eq("season", season)
-      .in("status", ["SCHEDULED", "TIMED"])
+      .in("status", statuses)
       .order("utc_date", { ascending: true })
-      .limit(50);
+      .limit(1000);
 
     if (fixturesError) {
       return new Response(
@@ -115,10 +167,12 @@ export async function GET() {
       );
     }
 
+    const typedFixtures = (fixtures || []) as FixtureRow[];
+
     let saved = 0;
     let skipped = 0;
 
-    for (const fixture of fixtures || []) {
+    for (const fixture of typedFixtures) {
       if (
         !fixture.home_team_id ||
         !fixture.away_team_id ||
@@ -141,14 +195,6 @@ export async function GET() {
         continue;
       }
 
-      const leagueAvgGoals =
-        snapshotRows && snapshotRows.length > 0
-          ? snapshotRows.reduce(
-              (sum, r) => sum + safeDiv(r.goals_for, r.played),
-              0
-            ) / snapshotRows.length
-          : 1.35;
-
       const homeAttack = safeDiv(home.home_goals_for, home.home_played);
       const awayAttack = safeDiv(away.away_goals_for, away.away_played);
 
@@ -156,10 +202,10 @@ export async function GET() {
       const awayDef = safeDiv(away.away_goals_against, away.away_played);
 
       let predictedHomeGoals =
-        leagueAvgGoals * (homeAttack / leagueAvgGoals) * (awayDef / leagueAvgGoals);
+        leagueAvgGoals * safeDiv(homeAttack, leagueAvgGoals) * safeDiv(awayDef, leagueAvgGoals);
 
       let predictedAwayGoals =
-        leagueAvgGoals * (awayAttack / leagueAvgGoals) * (homeDef / leagueAvgGoals);
+        leagueAvgGoals * safeDiv(awayAttack, leagueAvgGoals) * safeDiv(homeDef, leagueAvgGoals);
 
       predictedHomeGoals += 0.2;
 
@@ -169,13 +215,13 @@ export async function GET() {
       predictedHomeGoals = round1(predictedHomeGoals);
       predictedAwayGoals = round1(predictedAwayGoals);
 
-      let predictedResult = "DRAW";
+      let predictedResult: "HOME" | "DRAW" | "AWAY" = "DRAW";
       const diff = predictedHomeGoals - predictedAwayGoals;
 
       if (diff > 0.3) predictedResult = "HOME";
       if (diff < -0.3) predictedResult = "AWAY";
 
-      let confidenceLabel = "Medium";
+      let confidenceLabel: "High" | "Medium" | "Low" = "Medium";
       let confidenceScore = 0.67;
 
       if (Math.abs(diff) >= 0.9) {
@@ -200,6 +246,8 @@ export async function GET() {
         drawPct = toPct(100 - homeWinPct - awayWinPct);
       }
 
+      const nowIso = new Date().toISOString();
+
       const { error: upsertError } = await supabase.from("predictions").upsert(
         {
           fixture_id: fixture.id,
@@ -218,9 +266,9 @@ export async function GET() {
           predicted_score_away: Math.round(predictedAwayGoals),
           confidence_score: confidenceScore,
           confidence_label: confidenceLabel,
-          model_version: "snapshot-v2",
-          generated_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          model_version: includeFinished ? "snapshot-v3-multi-league" : "snapshot-v3-upcoming",
+          generated_at: nowIso,
+          updated_at: nowIso,
         },
         { onConflict: "fixture_id" }
       );
@@ -236,7 +284,15 @@ export async function GET() {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, saved, skipped }),
+      JSON.stringify({
+        ok: true,
+        saved,
+        skipped,
+        league_code: leagueCode,
+        season,
+        include_finished: includeFinished,
+        fixtures_considered: typedFixtures.length,
+      }),
       { headers: { "Content-Type": "application/json" } }
     );
   } catch (error) {
