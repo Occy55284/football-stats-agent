@@ -60,6 +60,7 @@ export async function GET(request: Request) {
     const apiToken = getApiToken();
     const supabase = getSupabaseAdmin();
 
+    // Fetch teams from football-data.org
     const fdRes = await fetch(
       `https://api.football-data.org/v4/competitions/${leagueCode}/teams?season=${season}`,
       {
@@ -99,20 +100,18 @@ export async function GET(request: Request) {
       );
     }
 
+    // IMPORTANT: matches your schema (NO league_code / season on teams)
     const rows = teams.map((team) => ({
       provider_team_id: team.id,
       name: team.name,
       short_name: team.shortName || team.tla || team.name,
       tla: team.tla || null,
       crest: team.crest || null,
-      venue: team.venue || null,
-      league_code: leagueCode,
-      season,
       updated_at: new Date().toISOString(),
     }));
 
     const { error } = await supabase.from("teams").upsert(rows, {
-      onConflict: "provider_team_id,league_code,season",
+      onConflict: "provider_team_id",
     });
 
     if (error) {
