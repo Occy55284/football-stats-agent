@@ -1,26 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
 
+const DEFAULT_SEASON = 2025;
+const DEFAULT_COMPETITION = "PL";
+const ALLOWED_COMPETITIONS = ["PL", "ELC"] as const;
+const FORM_MATCH_LIMIT = 5;
+
+type TeamRow = {
+  id: string;
+};
+
 type FixtureRow = {
-  league_code: string | null;
-  season: number | null;
   home_team_id: string | null;
   away_team_id: string | null;
   home_score: number | null;
   away_score: number | null;
+  utc_date: string | null;
   status: string | null;
-};
-
-type FormRow = {
-  team_id: string;
-  league_code: string;
-  season: number;
-  played: number;
-  won: number;
-  drawn: number;
-  lost: number;
-  goals_for: number;
-  goals_against: number;
-  points: number;
 };
 
 function getSupabaseAdmin() {
@@ -34,141 +29,179 @@ function getSupabaseAdmin() {
   return createClient(url, serviceRoleKey);
 }
 
-function getFormKey(teamId: string, leagueCode: string, season: number) {
-  return `${teamId}::${leagueCode}::${season}`;
+function parseCompetition(url: URL) {
+  const requested = (
+    url.searchParams.get("competition") ||
+    url.searchParams.get("league_code") ||
+    DEFAULT_COMPETITION
+  ).toUpperCase();
+
+  return ALLOWED_COMPETITIONS.includes(
+    requested as (typeof ALLOWED_COMPETITIONS)[number]
+  )
+    ? requested
+    : DEFAULT_COMPETITION;
 }
 
-export async function GET() {
+function parseSeason(url: URL) {
+  const raw = Number(url.searchParams.get("season") || DEFAULT_SEASON);
+  return Number.isFinite(raw) ? raw : DEFAULT_SEASON;
+}
+
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const leagueCode = parseCompetition(url);
+    const season = parseSeason(url);
+
     const supabase = getSupabaseAdmin();
 
-    const { data: fixtures, error } = await supabase
-      .from("fixtures")
-      .select(
-        "league_code, season, home_team_id, away_team_id, home_score, away_score, status"
-      )
-      .eq("league_code", "PL")
-      .eq("season", 2025)
-      .in("status", ["FINISHED"]);
+    const [{ data: teams, error: teamsError }, { data: fixtures, error: fixturesError }] =
+      await Promise.all([
+        supabase.from("teams").select("id"),
+        supabase
+          .from("fixtures")
+          .select("home_team_id, away_team_id, home_score, away_score, utc_date, status")
+          .eq("league_code", leagueCode)
+          .eq("season", season)
+          .in("status", ["FINISHED", "FT"])
+          .order("utc_date", { ascending: false }),
+      ]);
 
-    if (error) {
+    if (teamsError) {
       return new Response(
-        JSON.stringify({ ok: false, error: error.message }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({
+          ok: false,
+          error: teamsError.message,
+          league_code: leagueCode,
+          season,
+        }),
+        { status: 500 }
       );
     }
 
-    const formMap = new Map<string, FormRow>();
-
-    for (const match of (fixtures || []) as FixtureRow[]) {
-      if (
-        !match.home_team_id ||
-        !match.away_team_id ||
-        !match.league_code ||
-        match.season == null ||
-        match.home_score === null ||
-        match.away_score === null
-      ) {
-        continue;
-      }
-
-      const leagueCode = match.league_code;
-      const season = match.season;
-
-      const homeKey = getFormKey(match.home_team_id, leagueCode, season);
-      const awayKey = getFormKey(match.away_team_id, leagueCode, season);
-
-      if (!formMap.has(homeKey)) {
-        formMap.set(homeKey, {
-          team_id: match.home_team_id,
+    if (fixturesError) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: fixturesError.message,
           league_code: leagueCode,
           season,
-          played: 0,
-          won: 0,
-          drawn: 0,
-          lost: 0,
-          goals_for: 0,
-          goals_against: 0,
-          points: 0,
-        });
-      }
-
-      if (!formMap.has(awayKey)) {
-        formMap.set(awayKey, {
-          team_id: match.away_team_id,
-          league_code: leagueCode,
-          season,
-          played: 0,
-          won: 0,
-          drawn: 0,
-          lost: 0,
-          goals_for: 0,
-          goals_against: 0,
-          points: 0,
-        });
-      }
-
-      const home = formMap.get(homeKey)!;
-      const away = formMap.get(awayKey)!;
-
-      home.played += 1;
-      away.played += 1;
-
-      home.goals_for += match.home_score;
-      home.goals_against += match.away_score;
-
-      away.goals_for += match.away_score;
-      away.goals_against += match.home_score;
-
-      if (match.home_score > match.away_score) {
-        home.won += 1;
-        home.points += 3;
-        away.lost += 1;
-      } else if (match.home_score < match.away_score) {
-        away.won += 1;
-        away.points += 3;
-        home.lost += 1;
-      } else {
-        home.drawn += 1;
-        away.drawn += 1;
-        home.points += 1;
-        away.points += 1;
-      }
+        }),
+        { status: 500 }
+      );
     }
 
-    let saved = 0;
+    const typedTeams = (teams || []) as TeamRow[];
+    const typedFixtures = (fixtures || []) as FixtureRow[];
 
-    for (const row of formMap.values()) {
-      const { error: upsertError } = await supabase.from("team_form").upsert(
-        row,
-        {
-          onConflict: "team_id,league_code,season",
+    const recentByTeam = new Map<string, FixtureRow[]>();
+
+    for (const fixture of typedFixtures) {
+      if (fixture.home_team_id) {
+        const arr = recentByTeam.get(fixture.home_team_id) || [];
+        if (arr.length < FORM_MATCH_LIMIT) {
+          arr.push(fixture);
+          recentByTeam.set(fixture.home_team_id, arr);
         }
-      );
-
-      if (upsertError) {
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            error: upsertError.message,
-            failed_row: row,
-          }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
       }
 
-      saved += 1;
+      if (fixture.away_team_id) {
+        const arr = recentByTeam.get(fixture.away_team_id) || [];
+        if (arr.length < FORM_MATCH_LIMIT) {
+          arr.push(fixture);
+          recentByTeam.set(fixture.away_team_id, arr);
+        }
+      }
+    }
+
+    const rows = typedTeams.map((team) => {
+      const recent = recentByTeam.get(team.id) || [];
+
+      let played = 0;
+      let won = 0;
+      let drawn = 0;
+      let lost = 0;
+      let goalsFor = 0;
+      let goalsAgainst = 0;
+      let points = 0;
+
+      for (const match of recent) {
+        const isHome = match.home_team_id === team.id;
+        const gf = isHome ? match.home_score ?? 0 : match.away_score ?? 0;
+        const ga = isHome ? match.away_score ?? 0 : match.home_score ?? 0;
+
+        played += 1;
+        goalsFor += gf;
+        goalsAgainst += ga;
+
+        if (gf > ga) {
+          won += 1;
+          points += 3;
+        } else if (gf === ga) {
+          drawn += 1;
+          points += 1;
+        } else {
+          lost += 1;
+        }
+      }
+
+      return {
+        team_id: team.id,
+        played,
+        won,
+        drawn,
+        lost,
+        goals_for: goalsFor,
+        goals_against: goalsAgainst,
+        points,
+        league_code: leagueCode,
+        season,
+      };
+    });
+
+    const { error: deleteError } = await supabase
+      .from("team_form")
+      .delete()
+      .eq("league_code", leagueCode)
+      .eq("season", season);
+
+    if (deleteError) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: deleteError.message,
+          league_code: leagueCode,
+          season,
+        }),
+        { status: 500 }
+      );
+    }
+
+    const { error: insertError } = await supabase.from("team_form").insert(rows);
+
+    if (insertError) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: insertError.message,
+          league_code: leagueCode,
+          season,
+        }),
+        { status: 500 }
+      );
     }
 
     return new Response(
       JSON.stringify({
         ok: true,
-        saved,
-        count: formMap.size,
-        league_code: "PL",
-        season: 2025,
+        count: rows.length,
+        league_code: leagueCode,
+        season,
       }),
-      { headers: { "Content-Type": "application/json" } }
+      {
+        headers: { "Content-Type": "application/json" },
+      }
     );
   } catch (error) {
     return new Response(
@@ -176,7 +209,7 @@ export async function GET() {
         ok: false,
         error: error instanceof Error ? error.message : "Unknown error",
       }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500 }
     );
   }
 }
