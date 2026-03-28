@@ -1,30 +1,63 @@
 import { createClient } from "@supabase/supabase-js";
 
-type TeamRow = {
-  id: string;
+const DEFAULT_SEASON = 2025;
+const DEFAULT_COMPETITION = "PL";
+const ALLOWED_COMPETITIONS = ["PL", "ELC"] as const;
+
+type StandingRow = {
+  team_id: string;
+  played_games: number;
+  won: number;
+  draw: number;
+  lost: number;
+  goals_for: number;
+  goals_against: number;
+  goal_difference: number;
+  points: number;
+};
+
+type FormRow = {
+  team_id: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goals_for: number;
+  goals_against: number;
+  points: number;
 };
 
 type FixtureRow = {
-  id: string;
-  league_code: string | null;
-  season: number | null;
   home_team_id: string | null;
   away_team_id: string | null;
   home_score: number | null;
   away_score: number | null;
   status: string | null;
-  utc_date: string | null;
 };
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !serviceRoleKey) {
-    throw new Error("Missing Supabase environment variables");
-  }
+  if (!url || !key) throw new Error("Missing Supabase env");
 
-  return createClient(url, serviceRoleKey);
+  return createClient(url, key);
+}
+
+function parseCompetition(url: URL) {
+  const requested = (
+    url.searchParams.get("competition") ||
+    DEFAULT_COMPETITION
+  ).toUpperCase();
+
+  return ALLOWED_COMPETITIONS.includes(requested as any)
+    ? requested
+    : DEFAULT_COMPETITION;
+}
+
+function parseSeason(url: URL) {
+  const raw = Number(url.searchParams.get("season") || DEFAULT_SEASON);
+  return Number.isFinite(raw) ? raw : DEFAULT_SEASON;
 }
 
 function safeDiv(a: number, b: number) {
@@ -32,294 +65,170 @@ function safeDiv(a: number, b: number) {
   return a / b;
 }
 
-function round2(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const leagueCode = parseCompetition(url);
+    const season = parseSeason(url);
+
     const supabase = getSupabaseAdmin();
-    const leagueCode = "PL";
-    const season = 2025;
 
-    const { data: teams, error: teamsError } = await supabase
-      .from("teams")
-      .select("id");
+    const [{ data: standings }, { data: form }, { data: fixtures }] =
+      await Promise.all([
+        supabase
+          .from("standings")
+          .select("*")
+          .eq("league_code", leagueCode)
+          .eq("season", season),
 
-    if (teamsError) {
-      return new Response(
-        JSON.stringify({ ok: false, error: teamsError.message }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+        supabase
+          .from("team_form")
+          .select("*")
+          .eq("league_code", leagueCode)
+          .eq("season", season),
+
+        supabase
+          .from("fixtures")
+          .select("home_team_id, away_team_id, home_score, away_score, status")
+          .eq("league_code", leagueCode)
+          .eq("season", season)
+          .eq("status", "FINISHED"),
+      ]);
+
+    const standingsRows = (standings || []) as StandingRow[];
+    const formRows = (form || []) as FormRow[];
+    const fixtureRows = (fixtures || []) as FixtureRow[];
+
+    const formMap = new Map<string, FormRow>();
+    for (const f of formRows) {
+      formMap.set(f.team_id, f);
     }
 
-    const { data: fixtures, error: fixturesError } = await supabase
-      .from("fixtures")
-      .select(
-        "id, league_code, season, home_team_id, away_team_id, home_score, away_score, status, utc_date"
-      )
-      .eq("league_code", leagueCode)
-      .eq("season", season)
-      .eq("status", "FINISHED")
-      .order("utc_date", { ascending: true });
+    const homeStats = new Map<string, { played: number; gf: number; ga: number; pts: number }>();
+    const awayStats = new Map<string, { played: number; gf: number; ga: number; pts: number }>();
 
-    if (fixturesError) {
-      return new Response(
-        JSON.stringify({ ok: false, error: fixturesError.message }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+    for (const fix of fixtureRows) {
+      if (!fix.home_team_id || !fix.away_team_id) continue;
+
+      const home = homeStats.get(fix.home_team_id) || { played: 0, gf: 0, ga: 0, pts: 0 };
+      const away = awayStats.get(fix.away_team_id) || { played: 0, gf: 0, ga: 0, pts: 0 };
+
+      const hs = fix.home_score ?? 0;
+      const as = fix.away_score ?? 0;
+
+      home.played++;
+      home.gf += hs;
+      home.ga += as;
+
+      away.played++;
+      away.gf += as;
+      away.ga += hs;
+
+      if (hs > as) {
+        home.pts += 3;
+      } else if (hs < as) {
+        away.pts += 3;
+      } else {
+        home.pts += 1;
+        away.pts += 1;
+      }
+
+      homeStats.set(fix.home_team_id, home);
+      awayStats.set(fix.away_team_id, away);
     }
 
-    const finishedFixtures = (fixtures || []) as FixtureRow[];
+    const rows = standingsRows.map((s) => {
+      const form = formMap.get(s.team_id);
 
-    const leagueRows = finishedFixtures.filter(
-      (f) =>
-        f.home_team_id &&
-        f.away_team_id &&
-        f.home_score !== null &&
-        f.away_score !== null
-    );
+      const home = homeStats.get(s.team_id) || { played: 0, gf: 0, ga: 0, pts: 0 };
+      const away = awayStats.get(s.team_id) || { played: 0, gf: 0, ga: 0, pts: 0 };
 
-    const leagueAvgGoalsPerTeam =
-      leagueRows.length > 0
-        ? leagueRows.reduce(
-            (sum, f) => sum + (f.home_score ?? 0) + (f.away_score ?? 0),
-            0
-          ) /
-          (leagueRows.length * 2)
-        : 1.35;
+      const ppg = safeDiv(s.points, s.played_games);
+      const formScore = safeDiv(form?.points || 0, (form?.played || 1)) * 10;
 
-    let saved = 0;
+      const attack =
+        safeDiv(s.goals_for, s.played_games) * 0.6 +
+        safeDiv(home.gf, home.played) * 0.2 +
+        safeDiv(away.gf, away.played) * 0.2;
 
-    for (const team of (teams || []) as TeamRow[]) {
-      const teamId = team.id;
+      const defence =
+        3 - (
+          safeDiv(s.goals_against, s.played_games) * 0.6 +
+          safeDiv(home.ga, home.played) * 0.2 +
+          safeDiv(away.ga, away.played) * 0.2
+        );
 
-      const teamFixtures = finishedFixtures.filter(
-        (f) => f.home_team_id === teamId || f.away_team_id === teamId
-      );
+      const strength =
+        ppg * 2 +
+        formScore * 0.5 +
+        attack * 1.5 +
+        defence * 1.5;
 
-      let played = 0;
-      let wins = 0;
-      let draws = 0;
-      let losses = 0;
-      let goalsFor = 0;
-      let goalsAgainst = 0;
-
-      let homePlayed = 0;
-      let homeWins = 0;
-      let homeDraws = 0;
-      let homeLosses = 0;
-      let homeGoalsFor = 0;
-      let homeGoalsAgainst = 0;
-
-      let awayPlayed = 0;
-      let awayWins = 0;
-      let awayDraws = 0;
-      let awayLosses = 0;
-      let awayGoalsFor = 0;
-      let awayGoalsAgainst = 0;
-
-      let cleanSheets = 0;
-      let failedToScore = 0;
-      let bttsFor = 0;
-      let over25For = 0;
-
-      let last5Points = 0;
-      let last5Wins = 0;
-      let last5Draws = 0;
-      let last5Losses = 0;
-      let last5GoalsFor = 0;
-      let last5GoalsAgainst = 0;
-
-      for (const fixture of teamFixtures) {
-        if (fixture.home_score === null || fixture.away_score === null) continue;
-
-        const isHome = fixture.home_team_id === teamId;
-        const gf = isHome ? fixture.home_score : fixture.away_score;
-        const ga = isHome ? fixture.away_score : fixture.home_score;
-
-        played += 1;
-        goalsFor += gf;
-        goalsAgainst += ga;
-
-        if (isHome) {
-          homePlayed += 1;
-          homeGoalsFor += gf;
-          homeGoalsAgainst += ga;
-        } else {
-          awayPlayed += 1;
-          awayGoalsFor += gf;
-          awayGoalsAgainst += ga;
-        }
-
-        if (ga === 0) cleanSheets += 1;
-        if (gf === 0) failedToScore += 1;
-        if (gf > 0 && ga > 0) bttsFor += 1;
-        if (gf + ga > 2.5) over25For += 1;
-
-        if (gf > ga) {
-          wins += 1;
-          if (isHome) homeWins += 1;
-          else awayWins += 1;
-        } else if (gf < ga) {
-          losses += 1;
-          if (isHome) homeLosses += 1;
-          else awayLosses += 1;
-        } else {
-          draws += 1;
-          if (isHome) homeDraws += 1;
-          else awayDraws += 1;
-        }
-      }
-
-      const last5Fixtures = [...teamFixtures].slice(-5);
-
-      for (const fixture of last5Fixtures) {
-        if (fixture.home_score === null || fixture.away_score === null) continue;
-
-        const isHome = fixture.home_team_id === teamId;
-        const gf = isHome ? fixture.home_score : fixture.away_score;
-        const ga = isHome ? fixture.away_score : fixture.home_score;
-
-        last5GoalsFor += gf;
-        last5GoalsAgainst += ga;
-
-        if (gf > ga) {
-          last5Wins += 1;
-          last5Points += 3;
-        } else if (gf < ga) {
-          last5Losses += 1;
-        } else {
-          last5Draws += 1;
-          last5Points += 1;
-        }
-      }
-
-      const points = wins * 3 + draws;
-      const pointsPerGame = safeDiv(points, played);
-      const homePointsPerGame = safeDiv(homeWins * 3 + homeDraws, homePlayed);
-      const awayPointsPerGame = safeDiv(awayWins * 3 + awayDraws, awayPlayed);
-
-      const attackPerGame = safeDiv(goalsFor, played);
-      const defencePerGame = safeDiv(goalsAgainst, played);
-
-      const formScore = round2(safeDiv(last5Points, 15) * 100);
-
-      const attackScore = round2(
-        clamp((attackPerGame / Math.max(leagueAvgGoalsPerTeam, 0.1)) * 100, 0, 200)
-      );
-
-      const defenceScore = round2(
-        clamp(
-          (1 - defencePerGame / Math.max(leagueAvgGoalsPerTeam * 1.5, 0.1)) * 100,
-          0,
-          200
-        )
-      );
-
-      const overallStrengthScore = round2(
-        clamp(
-          formScore * 0.3 +
-            attackScore * 0.25 +
-            defenceScore * 0.2 +
-            clamp(pointsPerGame / 3, 0, 1) * 100 * 0.25,
-          0,
-          100
-        )
-      );
-
-      const snapshot = {
+      return {
+        team_id: s.team_id,
         league_code: leagueCode,
         season,
-        team_id: teamId,
 
-        played,
-        wins,
-        draws,
-        losses,
-        goals_for: goalsFor,
-        goals_against: goalsAgainst,
-        goal_difference: goalsFor - goalsAgainst,
-        points,
-        points_per_game: round2(pointsPerGame),
+        played: s.played_games,
+        wins: s.won,
+        draws: s.draw,
+        losses: s.lost,
+        goals_for: s.goals_for,
+        goals_against: s.goals_against,
+        goal_difference: s.goal_difference,
+        points: s.points,
+        points_per_game: ppg,
 
-        last_5_points: last5Points,
-        last_5_wins: last5Wins,
-        last_5_draws: last5Draws,
-        last_5_losses: last5Losses,
-        last_5_goals_for: last5GoalsFor,
-        last_5_goals_against: last5GoalsAgainst,
+        last_5_points: form?.points || 0,
 
-        home_played: homePlayed,
-        home_wins: homeWins,
-        home_draws: homeDraws,
-        home_losses: homeLosses,
-        home_goals_for: homeGoalsFor,
-        home_goals_against: homeGoalsAgainst,
-        home_points_per_game: round2(homePointsPerGame),
+        home_played: home.played,
+        home_goals_for: home.gf,
+        home_goals_against: home.ga,
+        home_points_per_game: safeDiv(home.pts, home.played),
 
-        away_played: awayPlayed,
-        away_wins: awayWins,
-        away_draws: awayDraws,
-        away_losses: awayLosses,
-        away_goals_for: awayGoalsFor,
-        away_goals_against: awayGoalsAgainst,
-        away_points_per_game: round2(awayPointsPerGame),
-
-        clean_sheets: cleanSheets,
-        failed_to_score: failedToScore,
-        btts_for: bttsFor,
-        over_25_for: over25For,
+        away_played: away.played,
+        away_goals_for: away.gf,
+        away_goals_against: away.ga,
+        away_points_per_game: safeDiv(away.pts, away.played),
 
         form_score: formScore,
-        attack_score: attackScore,
-        defence_score: defenceScore,
-        overall_strength_score: overallStrengthScore,
-
-        updated_at: new Date().toISOString(),
+        attack_score: attack,
+        defence_score: defence,
+        overall_strength_score: strength,
       };
+    });
 
-      const { error: upsertError } = await supabase
-        .from("team_stats_snapshot")
-        .upsert(snapshot, {
-          onConflict: "league_code,season,team_id",
-        });
+    await supabase
+      .from("team_stats_snapshot")
+      .delete()
+      .eq("league_code", leagueCode)
+      .eq("season", season);
 
-      if (upsertError) {
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            error: upsertError.message,
-            failed_team_id: teamId,
-          }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
-      }
+    const { error } = await supabase.from("team_stats_snapshot").insert(rows);
 
-      saved += 1;
+    if (error) {
+      return new Response(
+        JSON.stringify({ ok: false, error: error.message }),
+        { status: 500 }
+      );
     }
 
     return new Response(
       JSON.stringify({
         ok: true,
-        saved,
+        saved: rows.length,
         league_code: leagueCode,
         season,
-        league_average_goals_per_team: round2(leagueAvgGoalsPerTeam),
       }),
       { headers: { "Content-Type": "application/json" } }
     );
-  } catch (error) {
+  } catch (err) {
     return new Response(
       JSON.stringify({
         ok: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: err instanceof Error ? err.message : "Unknown",
       }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500 }
     );
   }
 }
