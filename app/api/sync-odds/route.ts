@@ -8,7 +8,7 @@ const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 const DEFAULT_REGIONS = "uk,eu";
 const DEFAULT_MARKETS = "h2h";
 const DEFAULT_ODDS_FORMAT = "decimal";
-const UPCOMING_WINDOW_HOURS = 168; // 7 days
+const UPCOMING_WINDOW_HOURS = 336; // 14 days
 
 type TeamRelation = {
   id: string;
@@ -22,6 +22,7 @@ type FixtureRow = {
   utc_date: string | null;
   home_team_id: string | null;
   away_team_id: string | null;
+  status?: string | null;
   home_team?: TeamRelation | TeamRelation[] | null;
   away_team?: TeamRelation | TeamRelation[] | null;
 };
@@ -244,6 +245,17 @@ function matchEventToFixture(fixtures: FixtureRow[], event: OddsApiEvent) {
   return bestScore >= 7 ? bestFixture : null;
 }
 
+function dedupeRows(rows: OddsUpsertRow[]) {
+  const map = new Map<string, OddsUpsertRow>();
+
+  for (const row of rows) {
+    const key = `${row.fixture_id}::${row.bookmaker}::${row.market}`;
+    map.set(key, row);
+  }
+
+  return Array.from(map.values());
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -264,6 +276,7 @@ export async function GET(request: Request) {
         league_code,
         season,
         utc_date,
+        status,
         home_team_id,
         away_team_id,
         home_team:home_team_id(id, name),
@@ -273,7 +286,6 @@ export async function GET(request: Request) {
       .eq("season", season)
       .gte("utc_date", now.toISOString())
       .lte("utc_date", upper.toISOString())
-      .in("status", ["SCHEDULED", "TIMED", "NS", "POSTPONED"])
       .order("utc_date", { ascending: true });
 
     if (fixturesError) {
@@ -290,7 +302,12 @@ export async function GET(request: Request) {
 
     const typedFixtures = ((fixtures || []) as unknown) as FixtureRow[];
 
-    if (!typedFixtures.length) {
+    const filteredFixtures = typedFixtures.filter((fixture) => {
+      const status = (fixture.status || "").toUpperCase();
+      return status !== "FINISHED" && status !== "FT" && status !== "CANCELLED";
+    });
+
+    if (!filteredFixtures.length) {
       return new Response(
         JSON.stringify({
           ok: true,
@@ -344,7 +361,7 @@ export async function GET(request: Request) {
     const fixtureToRows = new Map<string, OddsUpsertRow[]>();
 
     for (const event of events) {
-      const fixture = matchEventToFixture(typedFixtures, event);
+      const fixture = matchEventToFixture(filteredFixtures, event);
       const homeTeamName = fixture ? getTeamRelationName(fixture.home_team) : null;
       const awayTeamName = fixture ? getTeamRelationName(fixture.away_team) : null;
 
@@ -450,7 +467,7 @@ export async function GET(request: Request) {
         updated_at: syncedAt,
       });
 
-      fixtureToRows.set(fixture.id, completedRows);
+      fixtureToRows.set(fixture.id, dedupeRows(completedRows));
     }
 
     const fixtureIds = Array.from(fixtureToRows.keys());
@@ -477,7 +494,9 @@ export async function GET(request: Request) {
       deletedExisting = count || 0;
     }
 
-    const rowsToUpsert = fixtureIds.flatMap((fixtureId) => fixtureToRows.get(fixtureId) || []);
+    const rowsToUpsert = dedupeRows(
+      fixtureIds.flatMap((fixtureId) => fixtureToRows.get(fixtureId) || [])
+    );
 
     let saved = 0;
     if (rowsToUpsert.length) {
@@ -506,7 +525,7 @@ export async function GET(request: Request) {
         saved,
         deleted_existing: deletedExisting,
         matched_fixtures: fixtureIds.length,
-        considered_fixtures: typedFixtures.length,
+        considered_fixtures: filteredFixtures.length,
         odds_events_returned: events.length,
         sport_key: sportKey,
         league_code: leagueCode,
