@@ -1,32 +1,32 @@
 import { createClient } from "@supabase/supabase-js";
 
-type TeamRow = {
-  id: string;
-  provider_team_id: number | null;
-};
+const DEFAULT_SEASON = 2025;
+const DEFAULT_COMPETITION = "PL";
+const ALLOWED_COMPETITIONS = ["PL", "ELC"] as const;
 
 type FootballDataMatch = {
   id: number;
-  utcDate: string;
-  status: string;
-  matchday: number | null;
-  homeTeam?: { id?: number | null };
-  awayTeam?: { id?: number | null };
-  competition?: { code?: string | null };
-  season?: { startDate?: string | null };
+  utcDate?: string | null;
+  status?: string | null;
+  matchday?: number | null;
   score?: {
-    winner?: string | null;
     fullTime?: {
       home?: number | null;
       away?: number | null;
-    };
-  };
+    } | null;
+    winner?: string | null;
+  } | null;
+  homeTeam?: {
+    id: number;
+  } | null;
+  awayTeam?: {
+    id: number;
+  } | null;
 };
 
-type FootballDataResponse = {
-  competition?: { code?: string | null };
-  season?: { startDate?: string | null };
-  matches?: FootballDataMatch[];
+type TeamRow = {
+  id: string;
+  provider_team_id: number;
 };
 
 function getSupabaseAdmin() {
@@ -40,23 +40,41 @@ function getSupabaseAdmin() {
   return createClient(url, serviceRoleKey);
 }
 
-function getSeasonYear(startDate?: string | null) {
-  if (!startDate) return 2025;
-  const year = new Date(startDate).getUTCFullYear();
-  return Number.isFinite(year) ? year : 2025;
+function getApiToken() {
+  const token = process.env.FD_API_TOKEN;
+  if (!token) {
+    throw new Error("Missing FD_API_TOKEN");
+  }
+  return token;
 }
 
-export async function GET() {
-  try {
-    const supabase = getSupabaseAdmin();
-    const apiKey = process.env.FOOTBALL_DATA_API_KEY;
+function parseCompetition(url: URL) {
+  const requested = (
+    url.searchParams.get("competition") ||
+    url.searchParams.get("league_code") ||
+    DEFAULT_COMPETITION
+  ).toUpperCase();
 
-    if (!apiKey) {
-      return new Response(
-        JSON.stringify({ ok: false, error: "Missing FOOTBALL_DATA_API_KEY" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
+  return ALLOWED_COMPETITIONS.includes(
+    requested as (typeof ALLOWED_COMPETITIONS)[number]
+  )
+    ? requested
+    : DEFAULT_COMPETITION;
+}
+
+function parseSeason(url: URL) {
+  const raw = Number(url.searchParams.get("season") || DEFAULT_SEASON);
+  return Number.isFinite(raw) ? raw : DEFAULT_SEASON;
+}
+
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const leagueCode = parseCompetition(url);
+    const season = parseSeason(url);
+
+    const apiToken = getApiToken();
+    const supabase = getSupabaseAdmin();
 
     const { data: teams, error: teamsError } = await supabase
       .from("teams")
@@ -64,119 +82,118 @@ export async function GET() {
 
     if (teamsError) {
       return new Response(
-        JSON.stringify({ ok: false, error: teamsError.message }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({
+          ok: false,
+          error: teamsError.message,
+          league_code: leagueCode,
+          season,
+        }),
+        { status: 500 }
       );
     }
 
-    const teamMap = new Map<number, string>();
-    for (const team of (teams || []) as TeamRow[]) {
-      if (team.provider_team_id != null) {
-        teamMap.set(team.provider_team_id, team.id);
-      }
+    const typedTeams = (teams || []) as TeamRow[];
+    const teamIdMap = new Map<number, string>();
+
+    for (const team of typedTeams) {
+      teamIdMap.set(team.provider_team_id, team.id);
     }
 
-    const res = await fetch(
-      "https://api.football-data.org/v4/competitions/PL/matches",
+    const fdRes = await fetch(
+      `https://api.football-data.org/v4/competitions/${leagueCode}/matches?season=${season}`,
       {
         headers: {
-          "X-Auth-Token": apiKey,
+          "X-Auth-Token": apiToken,
         },
         cache: "no-store",
       }
     );
 
-    const rawText = await res.text();
-    let data: FootballDataResponse;
+    if (!fdRes.ok) {
+      const text = await fdRes.text();
 
-    try {
-      data = JSON.parse(rawText);
-    } catch {
       return new Response(
         JSON.stringify({
           ok: false,
-          error: "Invalid JSON returned by football-data API",
-          raw: rawText,
+          error: `football-data fixtures fetch failed: ${fdRes.status}`,
+          details: text,
+          league_code: leagueCode,
+          season,
         }),
-        { status: 502, headers: { "Content-Type": "application/json" } }
+        { status: 500 }
       );
     }
 
-    if (!res.ok) {
+    const payload = await fdRes.json();
+    const matches = (payload?.matches || []) as FootballDataMatch[];
+
+    if (!matches.length) {
       return new Response(
         JSON.stringify({
           ok: false,
-          error: "football-data API request failed",
-          status: res.status,
-          details: data,
+          error: `No fixtures returned for ${leagueCode} ${season}`,
+          league_code: leagueCode,
+          season,
         }),
-        { status: 502, headers: { "Content-Type": "application/json" } }
+        { status: 400 }
       );
     }
 
-    const matches = data.matches || [];
-    const leagueCode = data.competition?.code || "PL";
-    const season = getSeasonYear(data.season?.startDate);
+    const rows = matches
+      .map((match) => {
+        const homeProviderId = match.homeTeam?.id;
+        const awayProviderId = match.awayTeam?.id;
 
-    let saved = 0;
-    let skipped = 0;
+        if (!homeProviderId || !awayProviderId) return null;
 
-    for (const match of matches) {
-      const homeTeamId = match.homeTeam?.id
-        ? teamMap.get(match.homeTeam.id) || null
-        : null;
-      const awayTeamId = match.awayTeam?.id
-        ? teamMap.get(match.awayTeam.id) || null
-        : null;
+        const homeTeamId = teamIdMap.get(homeProviderId);
+        const awayTeamId = teamIdMap.get(awayProviderId);
 
-      if (!homeTeamId || !awayTeamId) {
-        skipped += 1;
-        continue;
-      }
+        if (!homeTeamId || !awayTeamId) return null;
 
-      const row = {
-        home_team_id: homeTeamId,
-        away_team_id: awayTeamId,
-        competition_code: match.competition?.code || leagueCode,
-        league_code: match.competition?.code || leagueCode,
-        season: getSeasonYear(match.season?.startDate) || season,
-        provider_match_id: match.id,
-        utc_date: match.utcDate,
-        status: match.status,
-        matchday: match.matchday,
-        home_score: match.score?.fullTime?.home ?? null,
-        away_score: match.score?.fullTime?.away ?? null,
-        winner: match.score?.winner ?? null,
-      };
+        return {
+          provider_match_id: match.id,
+          home_team_id: homeTeamId,
+          away_team_id: awayTeamId,
+          competition_code: leagueCode,
+          league_code: leagueCode,
+          season,
+          utc_date: match.utcDate || null,
+          status: match.status || null,
+          matchday: match.matchday || null,
+          home_score: match.score?.fullTime?.home ?? null,
+          away_score: match.score?.fullTime?.away ?? null,
+          winner: match.score?.winner || null,
+        };
+      })
+      .filter(Boolean);
 
-      const { error: upsertError } = await supabase
-        .from("fixtures")
-        .upsert(row, { onConflict: "provider_match_id" });
+    const { error } = await supabase.from("fixtures").upsert(rows, {
+      onConflict: "provider_match_id",
+    });
 
-      if (upsertError) {
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            error: upsertError.message,
-            failed_match_id: match.id,
-          }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      saved += 1;
+    if (error) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: error.message,
+          league_code: leagueCode,
+          season,
+        }),
+        { status: 500 }
+      );
     }
 
     return new Response(
       JSON.stringify({
         ok: true,
+        count: rows.length,
         league_code: leagueCode,
         season,
-        saved,
-        skipped,
-        count: matches.length,
       }),
-      { headers: { "Content-Type": "application/json" } }
+      {
+        headers: { "Content-Type": "application/json" },
+      }
     );
   } catch (error) {
     return new Response(
@@ -184,7 +201,7 @@ export async function GET() {
         ok: false,
         error: error instanceof Error ? error.message : "Unknown error",
       }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500 }
     );
   }
 }
