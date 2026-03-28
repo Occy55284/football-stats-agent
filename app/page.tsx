@@ -73,6 +73,7 @@ type ResultCard = {
   predictedScore: string;
   actualScore: string;
   isCorrect: boolean;
+  confidenceLabel: string;
 };
 
 const SUPPORTED_COMPETITIONS = [
@@ -267,6 +268,10 @@ function resultLabel(value: ResultCode, homeName: string, awayName: string) {
   if (value === "AWAY") return `${awayName} win`;
   if (value === "DRAW") return "Draw";
   return "Unknown";
+}
+
+function pct(value: number) {
+  return `${Math.round(value)}%`;
 }
 
 function TeamBadge({
@@ -477,6 +482,7 @@ function MatchBoardCard({ card, competition }: { card: PickCard; competition: st
 
 function ResultBoardCard({ card, competition }: { card: ResultCard; competition: string }) {
   const tone = resultTone(card.isCorrect);
+  const confidence = confidenceTone(card.confidenceLabel);
 
   return (
     <Link
@@ -558,23 +564,50 @@ function ResultBoardCard({ card, competition }: { card: ResultCard; competition:
 
             <div
               style={{
-                border: `1px solid ${tone.border}`,
-                background: tone.bg,
-                color: tone.text,
-                borderRadius: "12px",
-                padding: "10px 12px",
-                textAlign: "center",
-                minHeight: 44,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "14px",
-                fontWeight: 900,
-                lineHeight: 1.2,
-                boxShadow: "0 0 0 2px rgba(15,23,42,0.04)",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px",
               }}
             >
-              {tone.label}
+              <div
+                style={{
+                  border: `1px solid ${tone.border}`,
+                  background: tone.bg,
+                  color: tone.text,
+                  borderRadius: "12px",
+                  padding: "10px 12px",
+                  textAlign: "center",
+                  minHeight: 44,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "14px",
+                  fontWeight: 900,
+                  lineHeight: 1.2,
+                }}
+              >
+                {tone.label}
+              </div>
+
+              <div
+                style={{
+                  border: `1px solid ${confidence.border}`,
+                  background: confidence.bg,
+                  color: confidence.text,
+                  borderRadius: "12px",
+                  padding: "10px 12px",
+                  textAlign: "center",
+                  minHeight: 44,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "14px",
+                  fontWeight: 900,
+                  lineHeight: 1.2,
+                }}
+              >
+                {card.confidenceLabel}
+              </div>
             </div>
           </div>
 
@@ -582,6 +615,64 @@ function ResultBoardCard({ card, competition }: { card: ResultCard; competition:
         </div>
       </div>
     </Link>
+  );
+}
+
+function AccuracyCard({
+  title,
+  value,
+  subtitle,
+}: {
+  title: string;
+  value: string;
+  subtitle: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 55%, #eef4ff 100%)",
+        borderRadius: "24px",
+        border: "1px solid #dbe4f0",
+        padding: "22px",
+        boxShadow: "0 14px 32px rgba(15,23,42,0.08)",
+        textAlign: "center",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "12px",
+          fontWeight: 800,
+          letterSpacing: "0.6px",
+          color: "#64748b",
+          marginBottom: "8px",
+          textTransform: "uppercase",
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          fontSize: "34px",
+          fontWeight: 900,
+          color: "#0f172a",
+          lineHeight: 1.1,
+          marginBottom: "6px",
+        }}
+      >
+        {value}
+      </div>
+
+      <div
+        style={{
+          fontSize: "13px",
+          color: "#64748b",
+          fontWeight: 700,
+        }}
+      >
+        {subtitle}
+      </div>
+    </div>
   );
 }
 
@@ -639,9 +730,8 @@ export default async function HomePage({
       `)
       .eq("league_code", selectedCompetition)
       .eq("season", SEASON)
-      .gte("fixture.utc_date", nowIso)
       .order("updated_at", { ascending: false })
-      .limit(50),
+      .limit(700),
 
     supabase
       .from("team_stats_snapshot")
@@ -670,7 +760,13 @@ export default async function HomePage({
         ? new Date(prediction.fixture.utc_date).getTime()
         : 0;
 
-      return !!prediction.fixture_id && fixtureDate > Date.now();
+      return (
+        !!prediction.fixture_id &&
+        fixtureDate > Date.now() &&
+        !!prediction.fixture?.utc_date &&
+        prediction.fixture?.status !== "FINISHED" &&
+        prediction.fixture?.status !== "FT"
+      );
     })
     .map((prediction) => {
       const home = firstTeam(prediction.fixture?.home);
@@ -703,7 +799,7 @@ export default async function HomePage({
     .sort((a, b) => b.sortScore - a.sortScore)
     .slice(0, 8);
 
-  const recentResults: ResultCard[] = typedPredictions
+  const completedResults: ResultCard[] = typedPredictions
     .filter((prediction) => {
       const status = prediction.fixture?.status || "";
       return (
@@ -723,6 +819,10 @@ export default async function HomePage({
       );
 
       const predictedResult = toPredictedResultCode(prediction.predicted_result);
+      const confidenceLabel = shortConfidenceLabel(
+        prediction.confidence_label || prediction.confidence,
+        prediction.confidence_score
+      );
 
       return {
         fixtureId: prediction.fixture_id as string,
@@ -743,21 +843,35 @@ export default async function HomePage({
             ? `${resultLabel(actualResult, home.name, away.name)} (${prediction.fixture.home_score}-${prediction.fixture.away_score})`
             : resultLabel(actualResult, home.name, away.name),
         isCorrect: predictedResult !== "UNKNOWN" && predictedResult === actualResult,
+        confidenceLabel,
       };
     })
     .sort((a, b) => {
       const aTime = a.kickOff ? new Date(a.kickOff).getTime() : 0;
       const bTime = b.kickOff ? new Date(b.kickOff).getTime() : 0;
       return bTime - aTime;
-    })
-    .slice(0, 20);
+    });
+
+  const recentResults = completedResults.slice(0, 20);
 
   const headlineCard = boardCards[0] || null;
   const remainingCards = boardCards.slice(1);
 
-  const correctCount = recentResults.filter((item) => item.isCorrect).length;
-  const accuracyPct =
-    recentResults.length > 0 ? Math.round((correctCount / recentResults.length) * 100) : 0;
+  const overallTotal = completedResults.length;
+  const overallCorrect = completedResults.filter((item) => item.isCorrect).length;
+  const overallPct = overallTotal > 0 ? (overallCorrect / overallTotal) * 100 : 0;
+
+  const last20Total = recentResults.length;
+  const last20Correct = recentResults.filter((item) => item.isCorrect).length;
+  const last20Pct = last20Total > 0 ? (last20Correct / last20Total) * 100 : 0;
+
+  const highConfidenceResults = completedResults.filter(
+    (item) => item.confidenceLabel === "High"
+  );
+  const highConfidenceTotal = highConfidenceResults.length;
+  const highConfidenceCorrect = highConfidenceResults.filter((item) => item.isCorrect).length;
+  const highConfidencePct =
+    highConfidenceTotal > 0 ? (highConfidenceCorrect / highConfidenceTotal) * 100 : 0;
 
   return (
     <main
@@ -857,7 +971,7 @@ export default async function HomePage({
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)",
                 }}
               >
-                {recentResults.length} recent results • {accuracyPct}% hit rate
+                {overallTotal} graded results • {pct(overallPct)} hit rate
               </div>
             </div>
           </div>
@@ -898,6 +1012,44 @@ export default async function HomePage({
                 </Link>
               );
             })}
+          </div>
+        </section>
+
+        <section style={{ marginBottom: "26px" }}>
+          <div
+            style={{
+              fontSize: "24px",
+              fontWeight: 900,
+              textAlign: "center",
+              marginBottom: "16px",
+              color: "#0f172a",
+            }}
+          >
+            Accuracy Snapshot
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: "18px",
+            }}
+          >
+            <AccuracyCard
+              title="Overall Hit Rate"
+              value={pct(overallPct)}
+              subtitle={`${overallCorrect}/${overallTotal || 0} correct`}
+            />
+            <AccuracyCard
+              title="Last 20"
+              value={pct(last20Pct)}
+              subtitle={`${last20Correct}/${last20Total || 0} correct`}
+            />
+            <AccuracyCard
+              title="High Confidence"
+              value={pct(highConfidencePct)}
+              subtitle={`${highConfidenceCorrect}/${highConfidenceTotal || 0} correct`}
+            />
           </div>
         </section>
 
