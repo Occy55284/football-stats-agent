@@ -10,6 +10,11 @@ const DEFAULT_MARKETS = "h2h";
 const DEFAULT_ODDS_FORMAT = "decimal";
 const UPCOMING_WINDOW_HOURS = 168; // 7 days
 
+type TeamRelation = {
+  id: string;
+  name: string;
+};
+
 type FixtureRow = {
   id: string;
   league_code: string | null;
@@ -17,14 +22,8 @@ type FixtureRow = {
   utc_date: string | null;
   home_team_id: string | null;
   away_team_id: string | null;
-  home_team?: {
-    id: string;
-    name: string;
-  } | null;
-  away_team?: {
-    id: string;
-    name: string;
-  } | null;
+  home_team?: TeamRelation | TeamRelation[] | null;
+  away_team?: TeamRelation | TeamRelation[] | null;
 };
 
 type OddsApiOutcome = {
@@ -143,20 +142,13 @@ function normalizeName(value?: string | null) {
     .replace(/\bwest brom\b/g, "west bromwich albion")
     .replace(/\bw brom\b/g, "west bromwich albion")
     .replace(/\bpreston\b/g, "preston north end")
-    .replace(/\bportsmouth\b/g, "portsmouth")
     .replace(/\bblackburn\b/g, "blackburn rovers")
-    .replace(/\bbristol city\b/g, "bristol city")
     .replace(/\bman city\b/g, "manchester city")
     .replace(/\bman united\b/g, "manchester united")
     .replace(/\bspurs\b/g, "tottenham hotspur")
     .replace(/\bwolves\b/g, "wolverhampton wanderers")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function safeDiv(a: number, b: number) {
-  if (!b) return 0;
-  return a / b;
 }
 
 function round3(value: number) {
@@ -194,6 +186,12 @@ function avg(values: number[]) {
   return round3(values.reduce((sum, n) => sum + n, 0) / values.length);
 }
 
+function getTeamRelationName(team?: TeamRelation | TeamRelation[] | null) {
+  if (!team) return null;
+  if (Array.isArray(team)) return team[0]?.name || null;
+  return team.name || null;
+}
+
 function findOutcomePrice(outcomes: OddsApiOutcome[] | undefined, teamName: string) {
   const normalizedTeam = normalizeName(teamName);
   const outcome = (outcomes || []).find(
@@ -210,8 +208,8 @@ function findDrawPrice(outcomes: OddsApiOutcome[] | undefined) {
 }
 
 function scoreEventMatch(fixture: FixtureRow, event: OddsApiEvent) {
-  const fixtureHome = normalizeName(fixture.home_team?.name);
-  const fixtureAway = normalizeName(fixture.away_team?.name);
+  const fixtureHome = normalizeName(getTeamRelationName(fixture.home_team));
+  const fixtureAway = normalizeName(getTeamRelationName(fixture.away_team));
   const eventHome = normalizeName(event.home_team);
   const eventAway = normalizeName(event.away_team);
 
@@ -290,7 +288,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const typedFixtures = (fixtures || []) as FixtureRow[];
+    const typedFixtures = ((fixtures || []) as unknown) as FixtureRow[];
 
     if (!typedFixtures.length) {
       return new Response(
@@ -316,10 +314,10 @@ export async function GET(request: Request) {
     oddsUrl.searchParams.set("markets", DEFAULT_MARKETS);
     oddsUrl.searchParams.set("oddsFormat", DEFAULT_ODDS_FORMAT);
     oddsUrl.searchParams.set("dateFormat", "iso");
-    oddsUrl.searchParams.set("bookmakers", url.searchParams.get("bookmakers") || "");
 
-    if (!oddsUrl.searchParams.get("bookmakers")) {
-      oddsUrl.searchParams.delete("bookmakers");
+    const bookmakersParam = url.searchParams.get("bookmakers");
+    if (bookmakersParam) {
+      oddsUrl.searchParams.set("bookmakers", bookmakersParam);
     }
 
     const oddsRes = await fetch(oddsUrl.toString(), {
@@ -344,15 +342,15 @@ export async function GET(request: Request) {
     const events = (await oddsRes.json()) as OddsApiEvent[];
 
     const fixtureToRows = new Map<string, OddsUpsertRow[]>();
-    const matchedFixtureIds = new Set<string>();
 
     for (const event of events) {
       const fixture = matchEventToFixture(typedFixtures, event);
-      if (!fixture || !fixture.id || !fixture.home_team?.name || !fixture.away_team?.name) {
+      const homeTeamName = fixture ? getTeamRelationName(fixture.home_team) : null;
+      const awayTeamName = fixture ? getTeamRelationName(fixture.away_team) : null;
+
+      if (!fixture || !fixture.id || !homeTeamName || !awayTeamName) {
         continue;
       }
-
-      matchedFixtureIds.add(fixture.id);
 
       const bookmakerRows: OddsUpsertRow[] = [];
       const homeOddsList: number[] = [];
@@ -363,8 +361,8 @@ export async function GET(request: Request) {
         const market = (bookmaker.markets || []).find((m) => m.key === "h2h");
         if (!market) continue;
 
-        const homeOdds = findOutcomePrice(market.outcomes, fixture.home_team.name);
-        const awayOdds = findOutcomePrice(market.outcomes, fixture.away_team.name);
+        const homeOdds = findOutcomePrice(market.outcomes, homeTeamName);
+        const awayOdds = findOutcomePrice(market.outcomes, awayTeamName);
         const drawOdds = findDrawPrice(market.outcomes);
 
         if (!homeOdds || !awayOdds || !drawOdds) continue;
