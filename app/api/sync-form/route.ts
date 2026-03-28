@@ -56,9 +56,14 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseAdmin();
 
-    const [{ data: teams, error: teamsError }, { data: fixtures, error: fixturesError }] =
+    const [{ data: leagueFixtures, error: fixturesError }, { data: finishedFixtures, error: finishedError }] =
       await Promise.all([
-        supabase.from("teams").select("id"),
+        supabase
+          .from("fixtures")
+          .select("home_team_id, away_team_id")
+          .eq("league_code", leagueCode)
+          .eq("season", season),
+
         supabase
           .from("fixtures")
           .select("home_team_id, away_team_id, home_score, away_score, utc_date, status")
@@ -67,18 +72,6 @@ export async function GET(request: Request) {
           .in("status", ["FINISHED", "FT"])
           .order("utc_date", { ascending: false }),
       ]);
-
-    if (teamsError) {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          error: teamsError.message,
-          league_code: leagueCode,
-          season,
-        }),
-        { status: 500 }
-      );
-    }
 
     if (fixturesError) {
       return new Response(
@@ -92,13 +85,35 @@ export async function GET(request: Request) {
       );
     }
 
-    const typedTeams = (teams || []) as TeamRow[];
-    const typedFixtures = (fixtures || []) as FixtureRow[];
+    if (finishedError) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: finishedError.message,
+          league_code: leagueCode,
+          season,
+        }),
+        { status: 500 }
+      );
+    }
+
+    const typedLeagueFixtures = (leagueFixtures || []) as Array<{
+      home_team_id: string | null;
+      away_team_id: string | null;
+    }>;
+
+    const typedFinishedFixtures = (finishedFixtures || []) as FixtureRow[];
+
+    const leagueTeamIds = new Set<string>();
+    for (const fixture of typedLeagueFixtures) {
+      if (fixture.home_team_id) leagueTeamIds.add(fixture.home_team_id);
+      if (fixture.away_team_id) leagueTeamIds.add(fixture.away_team_id);
+    }
 
     const recentByTeam = new Map<string, FixtureRow[]>();
 
-    for (const fixture of typedFixtures) {
-      if (fixture.home_team_id) {
+    for (const fixture of typedFinishedFixtures) {
+      if (fixture.home_team_id && leagueTeamIds.has(fixture.home_team_id)) {
         const arr = recentByTeam.get(fixture.home_team_id) || [];
         if (arr.length < FORM_MATCH_LIMIT) {
           arr.push(fixture);
@@ -106,7 +121,7 @@ export async function GET(request: Request) {
         }
       }
 
-      if (fixture.away_team_id) {
+      if (fixture.away_team_id && leagueTeamIds.has(fixture.away_team_id)) {
         const arr = recentByTeam.get(fixture.away_team_id) || [];
         if (arr.length < FORM_MATCH_LIMIT) {
           arr.push(fixture);
@@ -115,8 +130,8 @@ export async function GET(request: Request) {
       }
     }
 
-    const rows = typedTeams.map((team) => {
-      const recent = recentByTeam.get(team.id) || [];
+    const rows = Array.from(leagueTeamIds).map((teamId) => {
+      const recent = recentByTeam.get(teamId) || [];
 
       let played = 0;
       let won = 0;
@@ -127,7 +142,7 @@ export async function GET(request: Request) {
       let points = 0;
 
       for (const match of recent) {
-        const isHome = match.home_team_id === team.id;
+        const isHome = match.home_team_id === teamId;
         const gf = isHome ? match.home_score ?? 0 : match.away_score ?? 0;
         const ga = isHome ? match.away_score ?? 0 : match.home_score ?? 0;
 
@@ -147,7 +162,7 @@ export async function GET(request: Request) {
       }
 
       return {
-        team_id: team.id,
+        team_id: teamId,
         played,
         won,
         drawn,
