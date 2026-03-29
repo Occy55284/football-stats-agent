@@ -3,20 +3,24 @@ import { NextResponse } from "next/server";
 const DEFAULT_SEASON = 2025;
 const DEFAULT_COMPETITIONS = ["PL", "ELC"];
 
-function getBaseUrl() {
-  return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-}
-
-async function runStep(baseUrl: string, path: string) {
-  const res = await fetch(`${baseUrl}${path}`, {
+async function runStep(origin: string, path: string) {
+  const response = await fetch(`${origin}${path}`, {
     method: "GET",
     cache: "no-store",
   });
 
-  const json = await res.json();
+  const text = await response.text();
+
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { raw: text };
+  }
 
   return {
-    ok: res.ok,
+    ok: response.ok,
+    status: response.status,
     path,
     result: json,
   };
@@ -25,72 +29,76 @@ async function runStep(baseUrl: string, path: string) {
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
+    const origin = url.origin;
 
     const season = Number(url.searchParams.get("season") || DEFAULT_SEASON);
     const competitionsParam = url.searchParams.get("competitions");
 
     const competitions = competitionsParam
-      ? competitionsParam.split(",").map((c) => c.trim().toUpperCase())
+      ? competitionsParam
+          .split(",")
+          .map((c) => c.trim().toUpperCase())
+          .filter(Boolean)
       : DEFAULT_COMPETITIONS;
 
-    const baseUrl = getBaseUrl();
-
-    const results: Record<string, any> = {};
+    const results: Record<string, Record<string, unknown>> = {};
 
     for (const comp of competitions) {
-      const leagueResults: Record<string, any> = {};
+      const leagueResults: Record<string, unknown> = {};
 
-      // 1. teams
       leagueResults["sync-teams"] = await runStep(
-        baseUrl,
+        origin,
         `/api/sync-teams?competition=${comp}&season=${season}`
       );
 
-      // 2. fixtures
       leagueResults["sync-fixtures"] = await runStep(
-        baseUrl,
+        origin,
         `/api/sync-fixtures?competition=${comp}&season=${season}`
       );
 
-      // 3. standings
       leagueResults["sync-standings"] = await runStep(
-        baseUrl,
+        origin,
         `/api/sync-standings?competition=${comp}&season=${season}`
       );
 
-      // 4. form
       leagueResults["sync-form"] = await runStep(
-        baseUrl,
+        origin,
         `/api/sync-form?competition=${comp}&season=${season}`
       );
 
-      // 5. snapshot rebuild
       leagueResults["rebuild-snapshot"] = await runStep(
-        baseUrl,
+        origin,
         `/api/rebuild-snapshot?competition=${comp}&season=${season}`
       );
 
-      // ✅ NEW STEP — odds sync (CRITICAL)
       leagueResults["sync-odds"] = await runStep(
-        baseUrl,
+        origin,
         `/api/sync-odds?competition=${comp}&season=${season}`
       );
 
-      // 7. predictions (now uses fresh odds)
       leagueResults["sync-predictions"] = await runStep(
-        baseUrl,
+        origin,
         `/api/sync-predictions?competition=${comp}&season=${season}`
       );
 
       results[comp] = leagueResults;
     }
 
-    return NextResponse.json({
-      ok: true,
-      season,
-      competitions,
-      results,
-    });
+    const hasFailure = Object.values(results).some((leagueResults) =>
+      Object.values(leagueResults).some(
+        (step) => !(step as { ok?: boolean }).ok
+      )
+    );
+
+    return NextResponse.json(
+      {
+        ok: !hasFailure,
+        season,
+        competitions,
+        results,
+      },
+      { status: hasFailure ? 500 : 200 }
+    );
   } catch (error) {
     return NextResponse.json(
       {
