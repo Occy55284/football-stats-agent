@@ -43,21 +43,22 @@ export default async function Page({ searchParams }: PageProps) {
 
   const now = new Date();
 
-  const upcoming = (fixtures ||)
+  // ✅ FIXED LINE HERE
+  const upcoming = (fixtures || [])
     .filter((f: any) => new Date(f.utc_date) > now)
     .slice(0, 8);
 
-  const results = (fixtures ||)
+  const results = (fixtures || [])
     .filter((f: any) => f.status === "FINISHED")
     .slice(0, 8);
 
-  const valuePicks = (predictions ||)
+  const valuePicks = (predictions || [])
     .filter((p: any) => p.best_value_edge > 3)
     .sort((a: any, b: any) => b.best_value_edge - a.best_value_edge)
     .slice(0, 5);
 
   const getFixture = (id: string) =>
-    (fixtures ||).find((f: any) => f.id === id);
+    (fixtures || []).find((f: any) => f.id === id);
 
   const getTeam = (id: string) => teamMap.get(id);
 
