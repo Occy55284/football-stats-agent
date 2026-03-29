@@ -1,133 +1,103 @@
+import { NextResponse } from "next/server";
+
 const DEFAULT_SEASON = 2025;
-const DEFAULT_COMPETITION = "PL";
-const ALLOWED_COMPETITIONS = ["PL", "ELC"] as const;
+const DEFAULT_COMPETITIONS = ["PL", "ELC"];
 
-function parseCompetition(url: URL) {
-  const requested = (
-    url.searchParams.get("competition") ||
-    url.searchParams.get("league_code") ||
-    DEFAULT_COMPETITION
-  ).toUpperCase();
-
-  return ALLOWED_COMPETITIONS.includes(
-    requested as (typeof ALLOWED_COMPETITIONS)[number]
-  )
-    ? requested
-    : DEFAULT_COMPETITION;
+function getBaseUrl() {
+  return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 }
 
-function parseSeason(url: URL) {
-  const raw = Number(url.searchParams.get("season") || DEFAULT_SEASON);
-  return Number.isFinite(raw) ? raw : DEFAULT_SEASON;
-}
-
-async function callStep(baseUrl: string, path: string, competition: string, season: number) {
-  const url = `${baseUrl}${path}?competition=${competition}&season=${season}`;
-
-  const res = await fetch(url, {
+async function runStep(baseUrl: string, path: string) {
+  const res = await fetch(`${baseUrl}${path}`, {
     method: "GET",
     cache: "no-store",
   });
 
-  const text = await res.text();
+  const json = await res.json();
 
-  let json: unknown = null;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = { raw: text };
-  }
-
-  if (!res.ok) {
-    throw new Error(
-      `${path} failed (${res.status}): ${
-        typeof json === "object" && json && "error" in json
-          ? String((json as { error?: string }).error)
-          : text
-      }`
-    );
-  }
-
-  return json;
+  return {
+    ok: res.ok,
+    path,
+    result: json,
+  };
 }
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const competition = parseCompetition(url);
-    const season = parseSeason(url);
 
-    const baseUrl = url.origin;
+    const season = Number(url.searchParams.get("season") || DEFAULT_SEASON);
+    const competitionsParam = url.searchParams.get("competitions");
 
-    const results: Record<string, unknown> = {};
+    const competitions = competitionsParam
+      ? competitionsParam.split(",").map((c) => c.trim().toUpperCase())
+      : DEFAULT_COMPETITIONS;
 
-    results["sync-teams"] = await callStep(
-      baseUrl,
-      "/api/sync-teams",
-      competition,
-      season
-    );
+    const baseUrl = getBaseUrl();
 
-    results["sync-fixtures"] = await callStep(
-      baseUrl,
-      "/api/sync-fixtures",
-      competition,
-      season
-    );
+    const results: Record<string, any> = {};
 
-    results["sync-standings"] = await callStep(
-      baseUrl,
-      "/api/sync-standings",
-      competition,
-      season
-    );
+    for (const comp of competitions) {
+      const leagueResults: Record<string, any> = {};
 
-    results["sync-form"] = await callStep(
-      baseUrl,
-      "/api/sync-form",
-      competition,
-      season
-    );
+      // 1. teams
+      leagueResults["sync-teams"] = await runStep(
+        baseUrl,
+        `/api/sync-teams?competition=${comp}&season=${season}`
+      );
 
-    results["rebuild-snapshot"] = await callStep(
-      baseUrl,
-      "/api/rebuild-snapshot",
-      competition,
-      season
-    );
+      // 2. fixtures
+      leagueResults["sync-fixtures"] = await runStep(
+        baseUrl,
+        `/api/sync-fixtures?competition=${comp}&season=${season}`
+      );
 
-    results["sync-predictions"] = await callStep(
-      baseUrl,
-      "/api/sync-predictions",
-      competition,
-      season
-    );
+      // 3. standings
+      leagueResults["sync-standings"] = await runStep(
+        baseUrl,
+        `/api/sync-standings?competition=${comp}&season=${season}`
+      );
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        league_code: competition,
-        season,
-        results,
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+      // 4. form
+      leagueResults["sync-form"] = await runStep(
+        baseUrl,
+        `/api/sync-form?competition=${comp}&season=${season}`
+      );
+
+      // 5. snapshot rebuild
+      leagueResults["rebuild-snapshot"] = await runStep(
+        baseUrl,
+        `/api/rebuild-snapshot?competition=${comp}&season=${season}`
+      );
+
+      // ✅ NEW STEP — odds sync (CRITICAL)
+      leagueResults["sync-odds"] = await runStep(
+        baseUrl,
+        `/api/sync-odds?competition=${comp}&season=${season}`
+      );
+
+      // 7. predictions (now uses fresh odds)
+      leagueResults["sync-predictions"] = await runStep(
+        baseUrl,
+        `/api/sync-predictions?competition=${comp}&season=${season}`
+      );
+
+      results[comp] = leagueResults;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      season,
+      competitions,
+      results,
+    });
   } catch (error) {
-    return new Response(
-      JSON.stringify({
+    return NextResponse.json(
+      {
         ok: false,
         error: error instanceof Error ? error.message : "Unknown error",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
+      },
+      { status: 500 }
     );
   }
 }
