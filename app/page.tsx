@@ -41,7 +41,7 @@ type PredictionRow = {
 type TeamRow = {
   id: string;
   name: string | null;
-  crest: string | null;
+  crest?: string | null;
 };
 
 const COMPETITIONS = [
@@ -64,7 +64,6 @@ function getSupabase() {
 
 function formatDateTime(value?: string | null) {
   if (!value) return "TBC";
-
   return new Date(value).toLocaleString("en-GB", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -80,45 +79,99 @@ function signed(value?: number | null) {
   return `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
 }
 
-function tierStyles(tier?: string | null) {
-  if (tier === "ELITE") {
-    return {
-      badge: "bg-emerald-500/15 text-emerald-700 border-emerald-300",
-      glow: "shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_18px_40px_rgba(16,185,129,0.14)]",
-    };
-  }
-
-  if (tier === "STRONG") {
-    return {
-      badge: "bg-blue-500/15 text-blue-700 border-blue-300",
-      glow: "shadow-[0_0_0_1px_rgba(59,130,246,0.16),0_18px_40px_rgba(59,130,246,0.10)]",
-    };
-  }
-
-  if (tier === "WATCH") {
-    return {
-      badge: "bg-amber-500/15 text-amber-700 border-amber-300",
-      glow: "shadow-[0_0_0_1px_rgba(245,158,11,0.16),0_18px_40px_rgba(245,158,11,0.10)]",
-    };
-  }
-
-  return {
-    badge: "bg-slate-500/10 text-slate-700 border-slate-300",
-    glow: "shadow-[0_0_0_1px_rgba(148,163,184,0.14),0_18px_40px_rgba(15,23,42,0.06)]",
-  };
-}
-
-function riskStyles(risk?: string | null) {
-  if (risk === "Low") return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (risk === "Medium") return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-rose-700 bg-rose-50 border-rose-200";
-}
-
 function outcomeLabel(value?: string | null) {
   if (value === "HOME") return "Home";
   if (value === "AWAY") return "Away";
   if (value === "DRAW") return "Draw";
   return value || "—";
+}
+
+function tierStyles(tier?: string | null) {
+  if (tier === "ELITE") {
+    return {
+      pill: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
+      accent: "from-emerald-500/20 to-teal-500/10",
+      ring: "hover:border-emerald-400/30",
+    };
+  }
+
+  if (tier === "STRONG") {
+    return {
+      pill: "bg-blue-500/15 text-blue-300 border-blue-400/30",
+      accent: "from-blue-500/20 to-cyan-500/10",
+      ring: "hover:border-blue-400/30",
+    };
+  }
+
+  if (tier === "WATCH") {
+    return {
+      pill: "bg-amber-500/15 text-amber-300 border-amber-400/30",
+      accent: "from-amber-500/20 to-orange-500/10",
+      ring: "hover:border-amber-400/30",
+    };
+  }
+
+  return {
+    pill: "bg-slate-500/15 text-slate-300 border-slate-400/20",
+    accent: "from-slate-500/10 to-slate-500/5",
+    ring: "hover:border-slate-500/30",
+  };
+}
+
+function riskStyles(risk?: string | null) {
+  if (risk === "Low") {
+    return "bg-emerald-500/10 text-emerald-300 border-emerald-400/25";
+  }
+  if (risk === "Medium") {
+    return "bg-amber-500/10 text-amber-300 border-amber-400/25";
+  }
+  return "bg-rose-500/10 text-rose-300 border-rose-400/25";
+}
+
+function resultBadge(correct?: boolean) {
+  if (correct === true) {
+    return "bg-emerald-500/10 text-emerald-300 border-emerald-400/25";
+  }
+  if (correct === false) {
+    return "bg-rose-500/10 text-rose-300 border-rose-400/25";
+  }
+  return "bg-slate-500/10 text-slate-300 border-slate-400/20";
+}
+
+function StatTile({
+  label,
+  value,
+  subtext,
+}: {
+  label: string;
+  value: string | number;
+  subtext?: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-sm p-4 md:p-5">
+      <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{label}</div>
+      <div className="mt-2 text-2xl md:text-3xl font-bold text-white">{value}</div>
+      {subtext ? <div className="mt-1 text-xs text-slate-400">{subtext}</div> : null}
+    </div>
+  );
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  subtitle,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="mb-5">
+      <div className="text-[11px] uppercase tracking-[0.24em] text-blue-300/80">{eyebrow}</div>
+      <h2 className="mt-2 text-2xl md:text-3xl font-bold text-white">{title}</h2>
+      {subtitle ? <p className="mt-2 text-sm text-slate-400">{subtitle}</p> : null}
+    </div>
+  );
 }
 
 export default async function Page({ searchParams }: PageProps) {
@@ -134,10 +187,7 @@ export default async function Page({ searchParams }: PageProps) {
       .eq("league_code", competition)
       .order("utc_date", { ascending: true }),
 
-    supabase
-      .from("predictions")
-      .select("*")
-      .eq("league_code", competition),
+    supabase.from("predictions").select("*").eq("league_code", competition),
 
     supabase.from("teams").select("id, name, crest"),
   ]);
@@ -148,11 +198,14 @@ export default async function Page({ searchParams }: PageProps) {
   const fixtureMap = new Map<string, FixtureRow>();
   (fixtures || []).forEach((f: any) => fixtureMap.set(f.id, f));
 
+  const predictionMap = new Map<string, PredictionRow>();
+  (predictions || []).forEach((p: any) => predictionMap.set(p.fixture_id, p));
+
   const now = new Date();
 
   const upcoming = ((fixtures || []) as FixtureRow[])
     .filter((f) => f.utc_date && new Date(f.utc_date) > now)
-    .slice(0, 10);
+    .slice(0, 8);
 
   const results = ((fixtures || []) as FixtureRow[])
     .filter((f) => f.status === "FINISHED")
@@ -174,350 +227,383 @@ export default async function Page({ searchParams }: PageProps) {
 
   const valuePicks =
     view === "elite"
-      ? allValueCards.filter((p) => p.edge_quality_tier === "ELITE").slice(0, 8)
+      ? allValueCards.filter((p) => p.edge_quality_tier === "ELITE").slice(0, 6)
       : view === "all"
-      ? allValueCards.slice(0, 8)
-      : allValueCards.filter((p) => p.bet_recommendation).slice(0, 8);
+      ? allValueCards.slice(0, 6)
+      : allValueCards.filter((p) => p.bet_recommendation).slice(0, 6);
 
-  const overallStats = {
-    totalUpcomingValue: allValueCards.length,
-    recommended: allValueCards.filter((p) => p.bet_recommendation).length,
-    elite: allValueCards.filter((p) => p.edge_quality_tier === "ELITE").length,
-    avgEdge:
-      allValueCards.length > 0
-        ? (
-            allValueCards.reduce((sum, p) => sum + Number(p.best_value_edge || 0), 0) /
-            allValueCards.length
-          ).toFixed(1)
-        : "0.0",
-  };
+  const predictionResults = results
+    .map((f) => {
+      const p = predictionMap.get(f.id);
+
+      if (!p) return null;
+
+      const actual =
+        Number(f.home_score || 0) > Number(f.away_score || 0)
+          ? "HOME"
+          : Number(f.home_score || 0) < Number(f.away_score || 0)
+          ? "AWAY"
+          : "DRAW";
+
+      return {
+        fixture: f,
+        prediction: p,
+        correct: p.predicted_result === actual,
+      };
+    })
+    .filter(Boolean) as { fixture: FixtureRow; prediction: PredictionRow; correct: boolean }[];
+
+  const recentAccuracy =
+    predictionResults.length > 0
+      ? Math.round(
+          (predictionResults.filter((r) => r.correct).length / predictionResults.length) * 100
+        )
+      : 0;
+
+  const averageEdge =
+    allValueCards.length > 0
+      ? (
+          allValueCards.reduce((sum, p) => sum + Number(p.best_value_edge || 0), 0) /
+          allValueCards.length
+        ).toFixed(1)
+      : "0.0";
+
+  const eliteCount = allValueCards.filter((p) => p.edge_quality_tier === "ELITE").length;
+  const recommendedCount = allValueCards.filter((p) => p.bet_recommendation).length;
 
   const getTeam = (id?: string | null) => (id ? teamMap.get(id) : null);
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto p-6 md:p-8">
-        <div className="rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-blue-950 text-white p-6 md:p-8 mb-8 shadow-2xl">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-[0.28em] text-blue-200/80 mb-2">
-                Football Stats Agent
+    <div className="min-h-screen bg-[#07111f] text-white">
+      <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
+        <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.22),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_28%),linear-gradient(180deg,#0b1728_0%,#07111f_100%)] p-6 md:p-8 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:28px_28px] opacity-20 pointer-events-none" />
+
+          <div className="relative z-10 flex flex-col gap-8">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+              <div className="max-w-3xl">
+                <div className="text-[11px] uppercase tracking-[0.28em] text-blue-300/80">
+                  Football Stats Agent
+                </div>
+                <h1 className="mt-3 text-3xl md:text-5xl font-bold tracking-tight text-white">
+                  Betting Insights Platform
+                </h1>
+                <p className="mt-4 max-w-2xl text-sm md:text-base text-slate-300 leading-7">
+                  Premium model-driven football insights combining prediction strength, market
+                  pricing and value edge into a cleaner betting board.
+                </p>
               </div>
-              <h1 className="text-3xl md:text-4xl font-bold leading-tight">
-                Betting Insights Board
-              </h1>
-              <p className="mt-2 text-sm md:text-base text-slate-300 max-w-2xl">
-                {COMPETITIONS.find((c) => c.code === competition)?.name} value spots ranked by
-                edge quality, expected value and risk.
-              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {COMPETITIONS.map((c) => (
+                  <Link
+                    key={c.code}
+                    href={`/?competition=${c.code}&view=${view}`}
+                    className={`rounded-full px-4 py-2 text-sm font-medium border transition ${
+                      competition === c.code
+                        ? "bg-white text-slate-950 border-white"
+                        : "bg-white/5 text-white border-white/10 hover:bg-white/10"
+                    }`}
+                  >
+                    {c.name}
+                  </Link>
+                ))}
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 min-w-full lg:min-w-[560px]">
-              <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
-                <div className="text-xs text-slate-300">Value matches</div>
-                <div className="text-2xl font-bold mt-1">{overallStats.totalUpcomingValue}</div>
-              </div>
-              <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
-                <div className="text-xs text-slate-300">Recommended</div>
-                <div className="text-2xl font-bold mt-1">{overallStats.recommended}</div>
-              </div>
-              <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
-                <div className="text-xs text-slate-300">Elite</div>
-                <div className="text-2xl font-bold mt-1">{overallStats.elite}</div>
-              </div>
-              <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
-                <div className="text-xs text-slate-300">Avg edge</div>
-                <div className="text-2xl font-bold mt-1">{overallStats.avgEdge}%</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-wrap gap-3">
-              {COMPETITIONS.map((c) => (
-                <Link
-                  key={c.code}
-                  href={`/?competition=${c.code}&view=${view}`}
-                  className={`px-4 py-2 rounded-full border text-sm transition ${
-                    competition === c.code
-                      ? "bg-white text-slate-950 border-white"
-                      : "border-white/20 text-white/90 hover:bg-white/10"
-                  }`}
-                >
-                  {c.name}
-                </Link>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-2">
               {VIEW_OPTIONS.map((option) => (
                 <Link
                   key={option.key}
                   href={`/?competition=${competition}&view=${option.key}`}
-                  className={`px-4 py-2 rounded-full border text-sm transition ${
+                  className={`rounded-full px-4 py-2 text-sm font-medium border transition ${
                     view === option.key
                       ? "bg-blue-500 text-white border-blue-500"
-                      : "border-white/20 text-white/90 hover:bg-white/10"
+                      : "bg-white/5 text-slate-200 border-white/10 hover:bg-white/10"
                   }`}
                 >
                   {option.label}
                 </Link>
               ))}
             </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <StatTile
+                label="Value Matches"
+                value={allValueCards.length}
+                subtext="Upcoming matches with positive edge"
+              />
+              <StatTile
+                label="Recommended"
+                value={recommendedCount}
+                subtext="Best filtered betting spots"
+              />
+              <StatTile
+                label="Elite Picks"
+                value={eliteCount}
+                subtext="Highest edge quality tier"
+              />
+              <StatTile
+                label="Recent Accuracy"
+                value={`${recentAccuracy}%`}
+                subtext="Based on latest finished predictions"
+              />
+            </div>
           </div>
         </div>
 
-        <div className="mb-10">
-          <div className="flex items-center justify-between mb-4">
+        <div className="mt-8 grid gap-8 xl:grid-cols-[1.45fr_0.85fr]">
+          <div>
+            <SectionHeader
+              eyebrow="Value Board"
+              title="Top Value Picks"
+              subtitle="Best opportunities ranked by edge quality, EV and confidence structure."
+            />
+
+            {valuePicks.length === 0 ? (
+              <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 text-slate-400">
+                No value picks match this filter right now.
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {valuePicks.map((p) => {
+                  const f = fixtureMap.get(p.fixture_id);
+                  if (!f) return null;
+
+                  const home = getTeam(f.home_team_id);
+                  const away = getTeam(f.away_team_id);
+                  const styles = tierStyles(p.edge_quality_tier);
+
+                  return (
+                    <Link
+                      key={p.fixture_id}
+                      href={`/match/${p.fixture_id}`}
+                      className={`group relative overflow-hidden rounded-[28px] border border-white/10 bg-[#0d1828] p-5 transition duration-200 hover:-translate-y-0.5 ${styles.ring}`}
+                    >
+                      <div className={`absolute inset-0 bg-gradient-to-br ${styles.accent} opacity-100`} />
+                      <div className="relative z-10">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${styles.pill}`}>
+                                {p.edge_quality_tier || "PASS"}
+                              </span>
+
+                              {p.bet_recommendation ? (
+                                <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">
+                                  Recommended
+                                </span>
+                              ) : null}
+
+                              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${riskStyles(p.risk_label)}`}>
+                                {p.risk_label || "—"} Risk
+                              </span>
+                            </div>
+
+                            <div className="mt-4 text-xl md:text-2xl font-bold text-white">
+                              {home?.name} vs {away?.name}
+                            </div>
+                            <div className="mt-1 text-sm text-slate-400">{formatDateTime(f.utc_date)}</div>
+                          </div>
+
+                          <div className="min-w-[150px] rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                              Best Value Side
+                            </div>
+                            <div className="mt-2 text-2xl font-bold text-white">
+                              {outcomeLabel(p.best_value_side)}
+                            </div>
+                            <div className="mt-2 text-sm text-slate-400">
+                              Confidence: {p.confidence || "—"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 grid gap-3 md:grid-cols-4">
+                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Edge</div>
+                            <div className="mt-2 text-xl font-bold text-emerald-300">
+                              {signed(p.best_value_edge)}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">EV</div>
+                            <div className="mt-2 text-xl font-bold text-blue-300">
+                              {signed(p.best_value_ev_pct)}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Quality</div>
+                            <div className="mt-2 text-xl font-bold text-white">
+                              {Number(p.edge_quality_score || 0)}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Avg Edge</div>
+                            <div className="mt-2 text-xl font-bold text-white">{averageEdge}%</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400 mb-3">
+                              Model
+                            </div>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300">Home</span>
+                                <span className="font-semibold text-white">{pct(p.home_win_pct)}%</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300">Draw</span>
+                                <span className="font-semibold text-white">{pct(p.draw_pct)}%</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300">Away</span>
+                                <span className="font-semibold text-white">{pct(p.away_win_pct)}%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400 mb-3">
+                              Market
+                            </div>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300">Home</span>
+                                <span className="font-semibold text-white">{pct(p.market_home_pct)}%</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300">Draw</span>
+                                <span className="font-semibold text-white">{pct(p.market_draw_pct)}%</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-300">Away</span>
+                                <span className="font-semibold text-white">{pct(p.market_away_pct)}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-8">
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">Premium Value Picks</h2>
-              <p className="text-sm text-slate-500 mt-1">
-                Ranked by edge quality score, not just headline edge.
-              </p>
+              <SectionHeader
+                eyebrow="Schedule"
+                title="Upcoming Matches"
+                subtitle="Quick access to the next fixtures in this competition."
+              />
+
+              <div className="grid gap-3">
+                {upcoming.map((f) => {
+                  const p = predictionMap.get(f.id);
+                  const home = getTeam(f.home_team_id);
+                  const away = getTeam(f.away_team_id);
+
+                  return (
+                    <Link
+                      key={f.id}
+                      href={`/match/${f.id}`}
+                      className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4 transition hover:bg-[#101d30]"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-base font-semibold text-white">
+                            {home?.name} vs {away?.name}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-400">
+                            {formatDateTime(f.utc_date)}
+                          </div>
+                        </div>
+
+                        {p ? (
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-white">
+                              {outcomeLabel(p.predicted_result)}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-400">
+                              {pct(p.home_win_pct)} / {pct(p.draw_pct)} / {pct(p.away_win_pct)}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
-          </div>
 
-          {valuePicks.length === 0 ? (
-            <div className="rounded-3xl border border-slate-200 bg-white p-8 text-slate-500">
-              No picks match this filter right now.
-            </div>
-          ) : (
-            <div className="grid lg:grid-cols-2 gap-5">
-              {valuePicks.map((p) => {
-                const f = fixtureMap.get(p.fixture_id);
-                if (!f) return null;
+            <div>
+              <SectionHeader
+                eyebrow="Performance"
+                title="Recent Results"
+                subtitle="Latest settled outcomes and hit-rate visibility."
+              />
 
-                const home = getTeam(f.home_team_id);
-                const away = getTeam(f.away_team_id);
-                const styles = tierStyles(p.edge_quality_tier);
+              <div className="grid gap-3">
+                {results.map((f) => {
+                  const p = predictionMap.get(f.id);
+                  const home = getTeam(f.home_team_id);
+                  const away = getTeam(f.away_team_id);
 
-                return (
-                  <Link
-                    key={p.fixture_id}
-                    href={`/match/${p.fixture_id}`}
-                    className={`rounded-3xl bg-white border border-slate-200 p-5 transition hover:-translate-y-0.5 ${styles.glow}`}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2 mb-2">
-                          <span
-                            className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${styles.badge}`}
-                          >
-                            {p.edge_quality_tier || "PASS"}
-                          </span>
+                  const actual =
+                    Number(f.home_score || 0) > Number(f.away_score || 0)
+                      ? "HOME"
+                      : Number(f.home_score || 0) < Number(f.away_score || 0)
+                      ? "AWAY"
+                      : "DRAW";
 
-                          {p.bet_recommendation ? (
-                            <span className="text-xs font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200">
-                              Recommended
-                            </span>
-                          ) : null}
-                        </div>
+                  const correct = p ? p.predicted_result === actual : undefined;
 
-                        <div className="text-lg md:text-xl font-bold text-slate-900">
-                          {home?.name} vs {away?.name}
-                        </div>
-                        <div className="text-sm text-slate-500 mt-1">
-                          {formatDateTime(f.utc_date)}
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-xs uppercase tracking-wide text-slate-500">
-                          Best side
-                        </div>
-                        <div className="text-lg font-bold text-slate-900">
-                          {outcomeLabel(p.best_value_side)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-4 gap-3 mt-5">
-                      <div className="rounded-2xl bg-slate-50 p-3 border border-slate-100">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
-                          Edge
-                        </div>
-                        <div className="text-base font-bold text-emerald-600 mt-1">
-                          {signed(p.best_value_edge)}
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl bg-slate-50 p-3 border border-slate-100">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
-                          EV
-                        </div>
-                        <div className="text-base font-bold text-blue-700 mt-1">
-                          {signed(p.best_value_ev_pct)}
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl bg-slate-50 p-3 border border-slate-100">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
-                          Quality
-                        </div>
-                        <div className="text-base font-bold text-slate-900 mt-1">
-                          {Number(p.edge_quality_score || 0)}
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl bg-slate-50 p-3 border border-slate-100">
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
-                          Risk
-                        </div>
-                        <div
-                          className={`inline-flex mt-1 px-2 py-1 rounded-full border text-xs font-semibold ${riskStyles(
-                            p.risk_label
-                          )}`}
-                        >
-                          {p.risk_label || "—"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 grid md:grid-cols-2 gap-4">
-                      <div className="rounded-2xl border border-slate-200 p-4">
-                        <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">
-                          Model probabilities
-                        </div>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span>Home</span>
-                            <span className="font-semibold">{pct(p.home_win_pct)}%</span>
+                  return (
+                    <Link
+                      key={f.id}
+                      href={`/match/${f.id}`}
+                      className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4 transition hover:bg-[#101d30]"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-base font-semibold text-white">
+                            {home?.name} vs {away?.name}
                           </div>
-                          <div className="flex justify-between">
-                            <span>Draw</span>
-                            <span className="font-semibold">{pct(p.draw_pct)}%</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Away</span>
-                            <span className="font-semibold">{pct(p.away_win_pct)}%</span>
+                          <div className="mt-1 text-sm text-slate-400">
+                            {f.home_score ?? "-"} - {f.away_score ?? "-"}
                           </div>
                         </div>
-                      </div>
 
-                      <div className="rounded-2xl border border-slate-200 p-4">
-                        <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">
-                          Market probabilities
-                        </div>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span>Home</span>
-                            <span className="font-semibold">{pct(p.market_home_pct)}%</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Draw</span>
-                            <span className="font-semibold">{pct(p.market_draw_pct)}%</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Away</span>
-                            <span className="font-semibold">{pct(p.market_away_pct)}%</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="grid xl:grid-cols-2 gap-8">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">Upcoming Matches</h2>
-            <div className="grid gap-4">
-              {upcoming.map((f) => {
-                const p = (predictions || []).find((x: any) => x.fixture_id === f.id) as
-                  | PredictionRow
-                  | undefined;
-
-                const home = getTeam(f.home_team_id);
-                const away = getTeam(f.away_team_id);
-
-                return (
-                  <Link
-                    key={f.id}
-                    href={`/match/${f.id}`}
-                    className="rounded-2xl bg-white border border-slate-200 p-4 hover:shadow-lg transition"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="font-semibold text-slate-900">
-                          {home?.name} vs {away?.name}
-                        </div>
-                        <div className="text-sm text-slate-500 mt-1">{formatDateTime(f.utc_date)}</div>
-                      </div>
-
-                      {p ? (
                         <div className="text-right">
-                          <div className="text-sm font-semibold text-slate-900">
-                            {outcomeLabel(p.predicted_result)}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-1">
-                            {pct(p.home_win_pct)} / {pct(p.draw_pct)} / {pct(p.away_win_pct)}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">Recent Results</h2>
-            <div className="grid gap-4">
-              {results.map((f) => {
-                const p = (predictions || []).find((x: any) => x.fixture_id === f.id) as
-                  | PredictionRow
-                  | undefined;
-
-                const home = getTeam(f.home_team_id);
-                const away = getTeam(f.away_team_id);
-
-                const actual =
-                  Number(f.home_score || 0) > Number(f.away_score || 0)
-                    ? "HOME"
-                    : Number(f.home_score || 0) < Number(f.away_score || 0)
-                    ? "AWAY"
-                    : "DRAW";
-
-                const correct = p?.predicted_result === actual;
-
-                return (
-                  <Link
-                    key={f.id}
-                    href={`/match/${f.id}`}
-                    className="rounded-2xl bg-white border border-slate-200 p-4 hover:shadow-lg transition"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="font-semibold text-slate-900">
-                          {home?.name} vs {away?.name}
-                        </div>
-                        <div className="text-sm text-slate-500 mt-1">
-                          {f.home_score ?? "-"} - {f.away_score ?? "-"}
+                          {p ? (
+                            <>
+                              <div
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resultBadge(
+                                  correct
+                                )}`}
+                              >
+                                {correct ? "Correct" : "Wrong"}
+                              </div>
+                              <div className="mt-2 text-xs text-slate-400">
+                                Predicted: {outcomeLabel(p.predicted_result)}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-xs text-slate-500">No prediction</div>
+                          )}
                         </div>
                       </div>
-
-                      {p ? (
-                        <div className="text-right">
-                          <div
-                            className={`text-sm font-semibold ${
-                              correct ? "text-emerald-600" : "text-rose-600"
-                            }`}
-                          >
-                            {correct ? "✓ Correct" : "✗ Wrong"}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-1">
-                            {outcomeLabel(p.predicted_result)}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </Link>
-                );
-              })}
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
