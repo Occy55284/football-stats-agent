@@ -100,41 +100,29 @@ function resultLabel(
 function tierClasses(tier?: string | null) {
   if (tier === "ELITE") {
     return {
-      badge:
-        "border-emerald-400/30 bg-emerald-500/10 text-emerald-300",
-      card:
-        "hover:border-emerald-400/30",
-      glow:
-        "from-emerald-500/18 via-teal-500/10 to-transparent",
+      badge: "border-emerald-400/30 bg-emerald-500/10 text-emerald-300",
+      card: "hover:border-emerald-400/30",
+      glow: "from-emerald-500/18 via-teal-500/10 to-transparent",
     };
   }
   if (tier === "STRONG") {
     return {
-      badge:
-        "border-blue-400/30 bg-blue-500/10 text-blue-300",
-      card:
-        "hover:border-blue-400/30",
-      glow:
-        "from-blue-500/18 via-cyan-500/10 to-transparent",
+      badge: "border-blue-400/30 bg-blue-500/10 text-blue-300",
+      card: "hover:border-blue-400/30",
+      glow: "from-blue-500/18 via-cyan-500/10 to-transparent",
     };
   }
   if (tier === "WATCH") {
     return {
-      badge:
-        "border-amber-400/30 bg-amber-500/10 text-amber-300",
-      card:
-        "hover:border-amber-400/30",
-      glow:
-        "from-amber-500/18 via-orange-500/10 to-transparent",
+      badge: "border-amber-400/30 bg-amber-500/10 text-amber-300",
+      card: "hover:border-amber-400/30",
+      glow: "from-amber-500/18 via-orange-500/10 to-transparent",
     };
   }
   return {
-    badge:
-      "border-slate-500/30 bg-slate-500/10 text-slate-300",
-    card:
-      "hover:border-slate-400/30",
-    glow:
-      "from-slate-500/12 via-slate-500/6 to-transparent",
+    badge: "border-slate-500/30 bg-slate-500/10 text-slate-300",
+    card: "hover:border-slate-400/30",
+    glow: "from-slate-500/12 via-slate-500/6 to-transparent",
   };
 }
 
@@ -226,18 +214,9 @@ function ThreeWayBar({
     <div className="space-y-2">
       <div className="h-2.5 overflow-hidden rounded-full bg-white/8">
         <div className="flex h-full w-full">
-          <div
-            className="bg-blue-400/80"
-            style={{ width: `${homeWidth}%` }}
-          />
-          <div
-            className="bg-slate-300/70"
-            style={{ width: `${drawWidth}%` }}
-          />
-          <div
-            className="bg-emerald-400/80"
-            style={{ width: `${awayWidth}%` }}
-          />
+          <div className="bg-blue-400/80" style={{ width: `${homeWidth}%` }} />
+          <div className="bg-slate-300/70" style={{ width: `${drawWidth}%` }} />
+          <div className="bg-emerald-400/80" style={{ width: `${awayWidth}%` }} />
         </div>
       </div>
 
@@ -308,29 +287,106 @@ export default async function Page({ searchParams }: PageProps) {
     )
     .slice(0, 8);
 
-  const allValuePicks = predictionRows
+  const upcomingPredictions = predictionRows
     .filter((p) => fixtureMap.has(p.fixture_id))
     .filter((p) => {
       const fixture = fixtureMap.get(p.fixture_id);
       return fixture?.utc_date && new Date(fixture.utc_date) > now;
-    })
+    });
+
+  const allValuePicks = upcomingPredictions
     .filter((p) => Number(p.best_value_edge || 0) > 1)
     .sort((a, b) => {
       const qa = Number(a.edge_quality_score || 0);
       const qb = Number(b.edge_quality_score || 0);
       if (qb !== qa) return qb - qa;
-
       return Number(b.best_value_ev_pct || 0) - Number(a.best_value_ev_pct || 0);
     });
 
-  const filteredValuePicks =
-    view === "elite"
-      ? allValuePicks.filter((p) => p.edge_quality_tier === "ELITE")
-      : view === "all"
-      ? allValuePicks
-      : allValuePicks.filter((p) => p.bet_recommendation);
+  const recommendedPicks = allValuePicks.filter((p) => p.bet_recommendation);
+  const elitePicks = allValuePicks.filter((p) => p.edge_quality_tier === "ELITE");
 
-  const valuePicks = filteredValuePicks.slice(0, 6);
+  const topPredictions = [...upcomingPredictions].sort((a, b) => {
+    const topA = Math.max(
+      Number(a.home_win_pct || 0),
+      Number(a.draw_pct || 0),
+      Number(a.away_win_pct || 0)
+    );
+    const topB = Math.max(
+      Number(b.home_win_pct || 0),
+      Number(b.draw_pct || 0),
+      Number(b.away_win_pct || 0)
+    );
+
+    if (topB !== topA) return topB - topA;
+
+    return (
+      Math.max(
+        Number(b.home_win_pct || 0),
+        Number(b.draw_pct || 0),
+        Number(b.away_win_pct || 0)
+      ) -
+      Math.max(
+        Number(a.home_win_pct || 0),
+        Number(a.draw_pct || 0),
+        Number(a.away_win_pct || 0)
+      )
+    );
+  });
+
+  let boardType: "recommended" | "all-value" | "top-predictions" = "recommended";
+  let boardTitle = "Top Value Picks";
+  let boardSubtitle =
+    "The strongest current spots ranked by edge quality first, then EV.";
+  let valuePicks: PredictionRow[] = [];
+
+  if (view === "elite") {
+    if (elitePicks.length > 0) {
+      valuePicks = elitePicks.slice(0, 6);
+      boardType = "recommended";
+      boardTitle = "Elite Value Picks";
+      boardSubtitle = "Highest-rated value spots in the current competition.";
+    } else if (allValuePicks.length > 0) {
+      valuePicks = allValuePicks.slice(0, 6);
+      boardType = "all-value";
+      boardTitle = "Top Value Picks";
+      boardSubtitle = "No elite picks available, so showing the best available value spots.";
+    } else {
+      valuePicks = topPredictions.slice(0, 6);
+      boardType = "top-predictions";
+      boardTitle = "Top Predictions";
+      boardSubtitle = "No value picks available, so showing the strongest model predictions.";
+    }
+  } else if (view === "all") {
+    if (allValuePicks.length > 0) {
+      valuePicks = allValuePicks.slice(0, 6);
+      boardType = "all-value";
+      boardTitle = "Top Value Picks";
+      boardSubtitle = "Best available value spots ranked by edge quality and EV.";
+    } else {
+      valuePicks = topPredictions.slice(0, 6);
+      boardType = "top-predictions";
+      boardTitle = "Top Predictions";
+      boardSubtitle = "No value picks available, so showing the strongest model predictions.";
+    }
+  } else {
+    if (recommendedPicks.length > 0) {
+      valuePicks = recommendedPicks.slice(0, 6);
+      boardType = "recommended";
+      boardTitle = "Top Value Picks";
+      boardSubtitle = "Recommended picks first. Strongest current spots ranked by edge quality and EV.";
+    } else if (allValuePicks.length > 0) {
+      valuePicks = allValuePicks.slice(0, 6);
+      boardType = "all-value";
+      boardTitle = "Top Value Picks";
+      boardSubtitle = "No recommended picks available, so showing the best available value spots.";
+    } else {
+      valuePicks = topPredictions.slice(0, 6);
+      boardType = "top-predictions";
+      boardTitle = "Top Predictions";
+      boardSubtitle = "No value picks available, so showing the strongest model predictions.";
+    }
+  }
 
   const settledPredictions = recentResults
     .map((fixture) => {
@@ -377,18 +433,15 @@ export default async function Page({ searchParams }: PageProps) {
         ).toFixed(1)
       : "0.0";
 
-  const eliteCount = allValuePicks.filter(
-    (p) => p.edge_quality_tier === "ELITE"
-  ).length;
-
-  const recommendedCount = allValuePicks.filter(
-    (p) => p.bet_recommendation
-  ).length;
+  const eliteCount = elitePicks.length;
+  const recommendedCount = recommendedPicks.length;
 
   const topPick = valuePicks[0] || null;
   const topFixture = topPick ? fixtureMap.get(topPick.fixture_id) : null;
   const topHome = topFixture ? getTeam(topFixture.home_team_id) : null;
   const topAway = topFixture ? getTeam(topFixture.away_team_id) : null;
+
+  const isPredictionFallback = boardType === "top-predictions";
 
   return (
     <div className="min-h-screen bg-[#07111f] text-white">
@@ -478,13 +531,13 @@ export default async function Page({ searchParams }: PageProps) {
             <div>
               <SectionHeader
                 kicker="Value Board"
-                title="Top Value Picks"
-                subtitle="The strongest current spots ranked by edge quality first, then EV."
+                title={boardTitle}
+                subtitle={boardSubtitle}
               />
 
               {valuePicks.length === 0 ? (
                 <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-6 text-slate-400">
-                  No picks match this filter right now.
+                  No upcoming predictions available right now.
                 </div>
               ) : (
                 <div className="grid gap-4">
@@ -509,25 +562,38 @@ export default async function Page({ searchParams }: PageProps) {
                           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
-                                <span
-                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tier.badge}`}
-                                >
-                                  {pick.edge_quality_tier || "PASS"}
-                                </span>
+                                {!isPredictionFallback ? (
+                                  <>
+                                    <span
+                                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tier.badge}`}
+                                    >
+                                      {pick.edge_quality_tier || "PASS"}
+                                    </span>
 
-                                {pick.bet_recommendation ? (
-                                  <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">
-                                    Recommended
-                                  </span>
-                                ) : null}
+                                    {pick.bet_recommendation ? (
+                                      <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">
+                                        Recommended
+                                      </span>
+                                    ) : null}
 
-                                <span
-                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${riskClasses(
-                                    pick.risk_label
-                                  )}`}
-                                >
-                                  {pick.risk_label || "—"} Risk
-                                </span>
+                                    <span
+                                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${riskClasses(
+                                        pick.risk_label
+                                      )}`}
+                                    >
+                                      {pick.risk_label || "—"} Risk
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-300">
+                                      Prediction Fallback
+                                    </span>
+                                    <span className="rounded-full border border-slate-400/20 bg-slate-500/10 px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+                                      Model Led
+                                    </span>
+                                  </>
+                                )}
                               </div>
 
                               <div className="mt-4 text-xl font-bold text-white md:text-2xl">
@@ -540,10 +606,14 @@ export default async function Page({ searchParams }: PageProps) {
 
                             <div className="min-w-[165px] rounded-[22px] border border-white/10 bg-white/[0.04] p-4">
                               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">
-                                Best Side
+                                {isPredictionFallback ? "Top Outcome" : "Best Side"}
                               </div>
                               <div className="mt-2 text-2xl font-bold text-white">
-                                {outcomeLabel(pick.best_value_side)}
+                                {outcomeLabel(
+                                  isPredictionFallback
+                                    ? pick.predicted_result
+                                    : pick.best_value_side
+                                )}
                               </div>
                               <div className="mt-2 text-xs text-slate-400">
                                 Confidence: {pick.confidence || "—"}
@@ -554,37 +624,49 @@ export default async function Page({ searchParams }: PageProps) {
                           <div className="mt-5 grid gap-3 md:grid-cols-4">
                             <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
                               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                Edge
-                              </div>
-                              <div className="mt-2 text-xl font-bold text-emerald-300">
-                                {signedPct(pick.best_value_edge)}
-                              </div>
-                            </div>
-
-                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
-                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                EV
-                              </div>
-                              <div className="mt-2 text-xl font-bold text-blue-300">
-                                {signedPct(pick.best_value_ev_pct)}
-                              </div>
-                            </div>
-
-                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
-                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                Quality
+                                {isPredictionFallback ? "Home" : "Edge"}
                               </div>
                               <div className="mt-2 text-xl font-bold text-white">
-                                {Math.round(Number(pick.edge_quality_score || 0))}
+                                {isPredictionFallback
+                                  ? pct(pick.home_win_pct)
+                                  : signedPct(pick.best_value_edge)}
                               </div>
                             </div>
 
                             <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
                               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                Market EV Avg
+                                {isPredictionFallback ? "Draw" : "EV"}
+                              </div>
+                              <div
+                                className={`mt-2 text-xl font-bold ${
+                                  isPredictionFallback ? "text-white" : "text-blue-300"
+                                }`}
+                              >
+                                {isPredictionFallback
+                                  ? pct(pick.draw_pct)
+                                  : signedPct(pick.best_value_ev_pct)}
+                              </div>
+                            </div>
+
+                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                {isPredictionFallback ? "Away" : "Quality"}
                               </div>
                               <div className="mt-2 text-xl font-bold text-white">
-                                {averageEv}%
+                                {isPredictionFallback
+                                  ? pct(pick.away_win_pct)
+                                  : Math.round(Number(pick.edge_quality_score || 0))}
+                              </div>
+                            </div>
+
+                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                {isPredictionFallback ? "Result" : "Market EV Avg"}
+                              </div>
+                              <div className="mt-2 text-xl font-bold text-white">
+                                {isPredictionFallback
+                                  ? outcomeLabel(pick.predicted_result)
+                                  : `${averageEv}%`}
                               </div>
                             </div>
                           </div>
@@ -603,13 +685,39 @@ export default async function Page({ searchParams }: PageProps) {
 
                             <div className="rounded-[22px] border border-white/10 bg-white/[0.04] p-4">
                               <div className="mb-3 text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                                Market Probabilities
+                                {isPredictionFallback
+                                  ? "Prediction Summary"
+                                  : "Market Probabilities"}
                               </div>
-                              <ThreeWayBar
-                                home={pick.market_home_pct}
-                                draw={pick.market_draw_pct}
-                                away={pick.market_away_pct}
-                              />
+
+                              {isPredictionFallback ? (
+                                <div className="space-y-2 text-sm text-slate-300">
+                                  <div className="flex items-center justify-between">
+                                    <span>Predicted Result</span>
+                                    <span className="font-semibold text-white">
+                                      {outcomeLabel(pick.predicted_result)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span>Confidence</span>
+                                    <span className="font-semibold text-white">
+                                      {pick.confidence || "—"}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span>Board Mode</span>
+                                    <span className="font-semibold text-white">
+                                      Fallback
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <ThreeWayBar
+                                  home={pick.market_home_pct}
+                                  draw={pick.market_draw_pct}
+                                  away={pick.market_away_pct}
+                                />
+                              )}
                             </div>
                           </div>
                         </div>
@@ -627,7 +735,7 @@ export default async function Page({ searchParams }: PageProps) {
                 <SectionHeader
                   kicker="Featured"
                   title="Top Board Position"
-                  subtitle="Highest-ranked current value spot from the active filter."
+                  subtitle="Highest-ranked current spot from the active board."
                 />
 
                 <Link
@@ -648,39 +756,59 @@ export default async function Page({ searchParams }: PageProps) {
                     </div>
 
                     <div
-                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tierClasses(
-                        topPick.edge_quality_tier
-                      ).badge}`}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                        isPredictionFallback
+                          ? "border-cyan-400/25 bg-cyan-500/10 text-cyan-300"
+                          : tierClasses(topPick.edge_quality_tier).badge
+                      }`}
                     >
-                      {topPick.edge_quality_tier || "PASS"}
+                      {isPredictionFallback
+                        ? "Prediction Fallback"
+                        : topPick.edge_quality_tier || "PASS"}
                     </div>
                   </div>
 
                   <div className="mt-5 grid grid-cols-3 gap-3">
                     <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
                       <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                        Side
+                        {isPredictionFallback ? "Result" : "Side"}
                       </div>
                       <div className="mt-2 text-lg font-bold text-white">
-                        {outcomeLabel(topPick.best_value_side)}
+                        {outcomeLabel(
+                          isPredictionFallback
+                            ? topPick.predicted_result
+                            : topPick.best_value_side
+                        )}
                       </div>
                     </div>
 
                     <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
                       <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                        Edge
+                        {isPredictionFallback ? "Home" : "Edge"}
                       </div>
-                      <div className="mt-2 text-lg font-bold text-emerald-300">
-                        {signedPct(topPick.best_value_edge)}
+                      <div
+                        className={`mt-2 text-lg font-bold ${
+                          isPredictionFallback ? "text-white" : "text-emerald-300"
+                        }`}
+                      >
+                        {isPredictionFallback
+                          ? pct(topPick.home_win_pct)
+                          : signedPct(topPick.best_value_edge)}
                       </div>
                     </div>
 
                     <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
                       <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                        EV
+                        {isPredictionFallback ? "Away" : "EV"}
                       </div>
-                      <div className="mt-2 text-lg font-bold text-blue-300">
-                        {signedPct(topPick.best_value_ev_pct)}
+                      <div
+                        className={`mt-2 text-lg font-bold ${
+                          isPredictionFallback ? "text-white" : "text-blue-300"
+                        }`}
+                      >
+                        {isPredictionFallback
+                          ? pct(topPick.away_win_pct)
+                          : signedPct(topPick.best_value_ev_pct)}
                       </div>
                     </div>
                   </div>
