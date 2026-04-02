@@ -2,10 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 import Link from "next/link";
 
 type PageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     competition?: string;
     view?: string;
-  };
+  }>;
 };
 
 type FixtureRow = {
@@ -71,10 +71,10 @@ function formatDateTime(value?: string | null) {
 }
 
 function pct(value?: number | null) {
-  return Number(value || 0).toFixed(1);
+  return `${Number(value || 0).toFixed(1)}%`;
 }
 
-function signed(value?: number | null) {
+function signedPct(value?: number | null) {
   const n = Number(value || 0);
   return `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
 }
@@ -86,435 +86,643 @@ function outcomeLabel(value?: string | null) {
   return value || "—";
 }
 
-function tierStyles(tier?: string | null) {
+function resultLabel(
+  homeScore?: number | null,
+  awayScore?: number | null
+): "HOME" | "DRAW" | "AWAY" {
+  const h = Number(homeScore || 0);
+  const a = Number(awayScore || 0);
+  if (h > a) return "HOME";
+  if (a > h) return "AWAY";
+  return "DRAW";
+}
+
+function tierClasses(tier?: string | null) {
   if (tier === "ELITE") {
     return {
-      pill: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
-      accent: "from-emerald-500/20 to-teal-500/10",
-      ring: "hover:border-emerald-400/30",
+      badge:
+        "border-emerald-400/30 bg-emerald-500/10 text-emerald-300",
+      card:
+        "hover:border-emerald-400/30",
+      glow:
+        "from-emerald-500/18 via-teal-500/10 to-transparent",
     };
   }
-
   if (tier === "STRONG") {
     return {
-      pill: "bg-blue-500/15 text-blue-300 border-blue-400/30",
-      accent: "from-blue-500/20 to-cyan-500/10",
-      ring: "hover:border-blue-400/30",
+      badge:
+        "border-blue-400/30 bg-blue-500/10 text-blue-300",
+      card:
+        "hover:border-blue-400/30",
+      glow:
+        "from-blue-500/18 via-cyan-500/10 to-transparent",
     };
   }
-
   if (tier === "WATCH") {
     return {
-      pill: "bg-amber-500/15 text-amber-300 border-amber-400/30",
-      accent: "from-amber-500/20 to-orange-500/10",
-      ring: "hover:border-amber-400/30",
+      badge:
+        "border-amber-400/30 bg-amber-500/10 text-amber-300",
+      card:
+        "hover:border-amber-400/30",
+      glow:
+        "from-amber-500/18 via-orange-500/10 to-transparent",
     };
   }
-
   return {
-    pill: "bg-slate-500/15 text-slate-300 border-slate-400/20",
-    accent: "from-slate-500/10 to-slate-500/5",
-    ring: "hover:border-slate-500/30",
+    badge:
+      "border-slate-500/30 bg-slate-500/10 text-slate-300",
+    card:
+      "hover:border-slate-400/30",
+    glow:
+      "from-slate-500/12 via-slate-500/6 to-transparent",
   };
 }
 
-function riskStyles(risk?: string | null) {
+function riskClasses(risk?: string | null) {
   if (risk === "Low") {
-    return "bg-emerald-500/10 text-emerald-300 border-emerald-400/25";
+    return "border-emerald-400/25 bg-emerald-500/10 text-emerald-300";
   }
   if (risk === "Medium") {
-    return "bg-amber-500/10 text-amber-300 border-amber-400/25";
+    return "border-amber-400/25 bg-amber-500/10 text-amber-300";
   }
-  return "bg-rose-500/10 text-rose-300 border-rose-400/25";
+  return "border-rose-400/25 bg-rose-500/10 text-rose-300";
 }
 
-function resultBadge(correct?: boolean) {
+function accuracyClasses(correct?: boolean) {
   if (correct === true) {
-    return "bg-emerald-500/10 text-emerald-300 border-emerald-400/25";
+    return "border-emerald-400/25 bg-emerald-500/10 text-emerald-300";
   }
   if (correct === false) {
-    return "bg-rose-500/10 text-rose-300 border-rose-400/25";
+    return "border-rose-400/25 bg-rose-500/10 text-rose-300";
   }
-  return "bg-slate-500/10 text-slate-300 border-slate-400/20";
-}
-
-function StatTile({
-  label,
-  value,
-  subtext,
-}: {
-  label: string;
-  value: string | number;
-  subtext?: string;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-sm p-4 md:p-5">
-      <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{label}</div>
-      <div className="mt-2 text-2xl md:text-3xl font-bold text-white">{value}</div>
-      {subtext ? <div className="mt-1 text-xs text-slate-400">{subtext}</div> : null}
-    </div>
-  );
+  return "border-slate-500/25 bg-slate-500/10 text-slate-300";
 }
 
 function SectionHeader({
-  eyebrow,
+  kicker,
   title,
   subtitle,
 }: {
-  eyebrow: string;
+  kicker: string;
   title: string;
   subtitle?: string;
 }) {
   return (
     <div className="mb-5">
-      <div className="text-[11px] uppercase tracking-[0.24em] text-blue-300/80">{eyebrow}</div>
-      <h2 className="mt-2 text-2xl md:text-3xl font-bold text-white">{title}</h2>
-      {subtitle ? <p className="mt-2 text-sm text-slate-400">{subtitle}</p> : null}
+      <div className="text-[11px] uppercase tracking-[0.28em] text-cyan-300/80">
+        {kicker}
+      </div>
+      <h2 className="mt-2 text-2xl font-bold tracking-tight text-white md:text-3xl">
+        {title}
+      </h2>
+      {subtitle ? (
+        <p className="mt-2 max-w-2xl text-sm text-slate-400">{subtitle}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  foot,
+}: {
+  label: string;
+  value: string | number;
+  foot?: string;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm">
+      <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">
+        {label}
+      </div>
+      <div className="mt-2 text-2xl font-bold text-white md:text-3xl">
+        {value}
+      </div>
+      {foot ? <div className="mt-1 text-xs text-slate-500">{foot}</div> : null}
+    </div>
+  );
+}
+
+function ThreeWayBar({
+  home,
+  draw,
+  away,
+}: {
+  home?: number | null;
+  draw?: number | null;
+  away?: number | null;
+}) {
+  const h = Math.max(Number(home || 0), 0);
+  const d = Math.max(Number(draw || 0), 0);
+  const a = Math.max(Number(away || 0), 0);
+  const total = h + d + a || 1;
+
+  const homeWidth = (h / total) * 100;
+  const drawWidth = (d / total) * 100;
+  const awayWidth = (a / total) * 100;
+
+  return (
+    <div className="space-y-2">
+      <div className="h-2.5 overflow-hidden rounded-full bg-white/8">
+        <div className="flex h-full w-full">
+          <div
+            className="bg-blue-400/80"
+            style={{ width: `${homeWidth}%` }}
+          />
+          <div
+            className="bg-slate-300/70"
+            style={{ width: `${drawWidth}%` }}
+          />
+          <div
+            className="bg-emerald-400/80"
+            style={{ width: `${awayWidth}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-400">
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full bg-blue-400/80" />
+          <span>Home {pct(home)}</span>
+        </div>
+        <div className="flex items-center justify-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full bg-slate-300/70" />
+          <span>Draw {pct(draw)}</span>
+        </div>
+        <div className="flex items-center justify-end gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full bg-emerald-400/80" />
+          <span>Away {pct(away)}</span>
+        </div>
+      </div>
     </div>
   );
 }
 
 export default async function Page({ searchParams }: PageProps) {
+  const params = (await searchParams) || {};
+  const competition = (params.competition || "PL").toUpperCase();
+  const view = (params.view || "recommended").toLowerCase();
+
   const supabase = getSupabase();
 
-  const competition = (searchParams?.competition || "PL").toUpperCase();
-  const view = (searchParams?.view || "recommended").toLowerCase();
+  const [{ data: fixtures }, { data: predictions }, { data: teams }] =
+    await Promise.all([
+      supabase
+        .from("fixtures")
+        .select("*")
+        .eq("league_code", competition)
+        .order("utc_date", { ascending: true }),
 
-  const [{ data: fixtures }, { data: predictions }, { data: teams }] = await Promise.all([
-    supabase
-      .from("fixtures")
-      .select("*")
-      .eq("league_code", competition)
-      .order("utc_date", { ascending: true }),
+      supabase.from("predictions").select("*").eq("league_code", competition),
 
-    supabase.from("predictions").select("*").eq("league_code", competition),
+      supabase.from("teams").select("id, name, crest"),
+    ]);
 
-    supabase.from("teams").select("id, name, crest"),
-  ]);
-
-  const teamMap = new Map<string, TeamRow>();
-  (teams || []).forEach((t: any) => teamMap.set(t.id, t));
+  const fixtureRows = (fixtures || []) as FixtureRow[];
+  const predictionRows = (predictions || []) as PredictionRow[];
+  const teamRows = (teams || []) as TeamRow[];
 
   const fixtureMap = new Map<string, FixtureRow>();
-  (fixtures || []).forEach((f: any) => fixtureMap.set(f.id, f));
+  fixtureRows.forEach((f) => fixtureMap.set(f.id, f));
 
   const predictionMap = new Map<string, PredictionRow>();
-  (predictions || []).forEach((p: any) => predictionMap.set(p.fixture_id, p));
+  predictionRows.forEach((p) => predictionMap.set(p.fixture_id, p));
+
+  const teamMap = new Map<string, TeamRow>();
+  teamRows.forEach((t) => teamMap.set(t.id, t));
 
   const now = new Date();
 
-  const upcoming = ((fixtures || []) as FixtureRow[])
+  const getTeam = (id?: string | null) => (id ? teamMap.get(id) : undefined);
+
+  const upcomingFixtures = fixtureRows
     .filter((f) => f.utc_date && new Date(f.utc_date) > now)
     .slice(0, 8);
 
-  const results = ((fixtures || []) as FixtureRow[])
+  const recentResults = fixtureRows
     .filter((f) => f.status === "FINISHED")
-    .sort((a, b) => new Date(b.utc_date || "").getTime() - new Date(a.utc_date || "").getTime())
+    .sort(
+      (a, b) =>
+        new Date(b.utc_date || "").getTime() - new Date(a.utc_date || "").getTime()
+    )
     .slice(0, 8);
 
-  const allValueCards = ((predictions || []) as PredictionRow[])
+  const allValuePicks = predictionRows
     .filter((p) => fixtureMap.has(p.fixture_id))
     .filter((p) => {
-      const f = fixtureMap.get(p.fixture_id);
-      return !!f?.utc_date && new Date(f.utc_date) > now;
+      const fixture = fixtureMap.get(p.fixture_id);
+      return fixture?.utc_date && new Date(fixture.utc_date) > now;
     })
     .filter((p) => Number(p.best_value_edge || 0) > 1)
     .sort((a, b) => {
-      const scoreDiff = Number(b.edge_quality_score || 0) - Number(a.edge_quality_score || 0);
-      if (scoreDiff !== 0) return scoreDiff;
+      const qa = Number(a.edge_quality_score || 0);
+      const qb = Number(b.edge_quality_score || 0);
+      if (qb !== qa) return qb - qa;
+
       return Number(b.best_value_ev_pct || 0) - Number(a.best_value_ev_pct || 0);
     });
 
-  const valuePicks =
+  const filteredValuePicks =
     view === "elite"
-      ? allValueCards.filter((p) => p.edge_quality_tier === "ELITE").slice(0, 6)
+      ? allValuePicks.filter((p) => p.edge_quality_tier === "ELITE")
       : view === "all"
-      ? allValueCards.slice(0, 6)
-      : allValueCards.filter((p) => p.bet_recommendation).slice(0, 6);
+      ? allValuePicks
+      : allValuePicks.filter((p) => p.bet_recommendation);
 
-  const predictionResults = results
-    .map((f) => {
-      const p = predictionMap.get(f.id);
+  const valuePicks = filteredValuePicks.slice(0, 6);
 
-      if (!p) return null;
+  const settledPredictions = recentResults
+    .map((fixture) => {
+      const prediction = predictionMap.get(fixture.id);
+      if (!prediction) return null;
 
-      const actual =
-        Number(f.home_score || 0) > Number(f.away_score || 0)
-          ? "HOME"
-          : Number(f.home_score || 0) < Number(f.away_score || 0)
-          ? "AWAY"
-          : "DRAW";
+      const actual = resultLabel(fixture.home_score, fixture.away_score);
+      const correct = prediction.predicted_result === actual;
 
-      return {
-        fixture: f,
-        prediction: p,
-        correct: p.predicted_result === actual,
-      };
+      return { fixture, prediction, correct };
     })
-    .filter(Boolean) as { fixture: FixtureRow; prediction: PredictionRow; correct: boolean }[];
+    .filter(Boolean) as {
+    fixture: FixtureRow;
+    prediction: PredictionRow;
+    correct: boolean;
+  }[];
 
   const recentAccuracy =
-    predictionResults.length > 0
+    settledPredictions.length > 0
       ? Math.round(
-          (predictionResults.filter((r) => r.correct).length / predictionResults.length) * 100
+          (settledPredictions.filter((x) => x.correct).length /
+            settledPredictions.length) *
+            100
         )
       : 0;
 
   const averageEdge =
-    allValueCards.length > 0
+    allValuePicks.length > 0
       ? (
-          allValueCards.reduce((sum, p) => sum + Number(p.best_value_edge || 0), 0) /
-          allValueCards.length
+          allValuePicks.reduce(
+            (sum, p) => sum + Number(p.best_value_edge || 0),
+            0
+          ) / allValuePicks.length
         ).toFixed(1)
       : "0.0";
 
-  const eliteCount = allValueCards.filter((p) => p.edge_quality_tier === "ELITE").length;
-  const recommendedCount = allValueCards.filter((p) => p.bet_recommendation).length;
+  const averageEv =
+    allValuePicks.length > 0
+      ? (
+          allValuePicks.reduce(
+            (sum, p) => sum + Number(p.best_value_ev_pct || 0),
+            0
+          ) / allValuePicks.length
+        ).toFixed(1)
+      : "0.0";
 
-  const getTeam = (id?: string | null) => (id ? teamMap.get(id) : null);
+  const eliteCount = allValuePicks.filter(
+    (p) => p.edge_quality_tier === "ELITE"
+  ).length;
+
+  const recommendedCount = allValuePicks.filter(
+    (p) => p.bet_recommendation
+  ).length;
+
+  const topPick = valuePicks[0] || null;
+  const topFixture = topPick ? fixtureMap.get(topPick.fixture_id) : null;
+  const topHome = topFixture ? getTeam(topFixture.home_team_id) : null;
+  const topAway = topFixture ? getTeam(topFixture.away_team_id) : null;
 
   return (
     <div className="min-h-screen bg-[#07111f] text-white">
       <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
-        <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.22),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_28%),linear-gradient(180deg,#0b1728_0%,#07111f_100%)] p-6 md:p-8 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:28px_28px] opacity-20 pointer-events-none" />
-
-          <div className="relative z-10 flex flex-col gap-8">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+        <div className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.16),transparent_25%),radial-gradient(circle_at_85%_15%,rgba(16,185,129,0.12),transparent_22%),linear-gradient(180deg,#0c1728_0%,#07111f_100%)] shadow-[0_30px_80px_rgba(0,0,0,0.42)]">
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:30px_30px] opacity-20" />
+          <div className="relative z-10 p-6 md:p-8">
+            <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
               <div className="max-w-3xl">
-                <div className="text-[11px] uppercase tracking-[0.28em] text-blue-300/80">
+                <div className="text-[11px] uppercase tracking-[0.3em] text-cyan-300/80">
                   Football Stats Agent
                 </div>
-                <h1 className="mt-3 text-3xl md:text-5xl font-bold tracking-tight text-white">
-                  Betting Insights Platform
+                <h1 className="mt-3 text-3xl font-bold tracking-tight text-white md:text-5xl">
+                  Premium Betting Insights
                 </h1>
-                <p className="mt-4 max-w-2xl text-sm md:text-base text-slate-300 leading-7">
-                  Premium model-driven football insights combining prediction strength, market
-                  pricing and value edge into a cleaner betting board.
+                <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                  A cleaner match board built around model strength, market
+                  pricing, edge quality and value selection.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {COMPETITIONS.map((c) => (
+                {COMPETITIONS.map((item) => (
                   <Link
-                    key={c.code}
-                    href={`/?competition=${c.code}&view=${view}`}
-                    className={`rounded-full px-4 py-2 text-sm font-medium border transition ${
-                      competition === c.code
-                        ? "bg-white text-slate-950 border-white"
-                        : "bg-white/5 text-white border-white/10 hover:bg-white/10"
+                    key={item.code}
+                    href={`/?competition=${item.code}&view=${view}`}
+                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                      competition === item.code
+                        ? "border-white bg-white text-slate-950"
+                        : "border-white/10 bg-white/5 text-white hover:bg-white/10"
                     }`}
                   >
-                    {c.name}
+                    {item.name}
                   </Link>
                 ))}
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {VIEW_OPTIONS.map((option) => (
+            <div className="mt-5 flex flex-wrap gap-2">
+              {VIEW_OPTIONS.map((item) => (
                 <Link
-                  key={option.key}
-                  href={`/?competition=${competition}&view=${option.key}`}
-                  className={`rounded-full px-4 py-2 text-sm font-medium border transition ${
-                    view === option.key
-                      ? "bg-blue-500 text-white border-blue-500"
-                      : "bg-white/5 text-slate-200 border-white/10 hover:bg-white/10"
+                  key={item.key}
+                  href={`/?competition=${competition}&view=${item.key}`}
+                  className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                    view === item.key
+                      ? "border-cyan-400 bg-cyan-500 text-slate-950"
+                      : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
                   }`}
                 >
-                  {option.label}
+                  {item.label}
                 </Link>
               ))}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <StatTile
+            <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <MetricTile
                 label="Value Matches"
-                value={allValueCards.length}
-                subtext="Upcoming matches with positive edge"
+                value={allValuePicks.length}
+                foot="Upcoming fixtures with positive edge"
               />
-              <StatTile
+              <MetricTile
                 label="Recommended"
                 value={recommendedCount}
-                subtext="Best filtered betting spots"
+                foot="Filtered bet-ready spots"
               />
-              <StatTile
-                label="Elite Picks"
+              <MetricTile
+                label="Elite"
                 value={eliteCount}
-                subtext="Highest edge quality tier"
+                foot="Top quality tier"
               />
-              <StatTile
+              <MetricTile
+                label="Avg Edge"
+                value={`${averageEdge}%`}
+                foot="Across current value board"
+              />
+              <MetricTile
                 label="Recent Accuracy"
                 value={`${recentAccuracy}%`}
-                subtext="Based on latest finished predictions"
+                foot="Latest finished predictions"
               />
             </div>
           </div>
         </div>
 
-        <div className="mt-8 grid gap-8 xl:grid-cols-[1.45fr_0.85fr]">
-          <div>
-            <SectionHeader
-              eyebrow="Value Board"
-              title="Top Value Picks"
-              subtitle="Best opportunities ranked by edge quality, EV and confidence structure."
-            />
-
-            {valuePicks.length === 0 ? (
-              <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 text-slate-400">
-                No value picks match this filter right now.
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {valuePicks.map((p) => {
-                  const f = fixtureMap.get(p.fixture_id);
-                  if (!f) return null;
-
-                  const home = getTeam(f.home_team_id);
-                  const away = getTeam(f.away_team_id);
-                  const styles = tierStyles(p.edge_quality_tier);
-
-                  return (
-                    <Link
-                      key={p.fixture_id}
-                      href={`/match/${p.fixture_id}`}
-                      className={`group relative overflow-hidden rounded-[28px] border border-white/10 bg-[#0d1828] p-5 transition duration-200 hover:-translate-y-0.5 ${styles.ring}`}
-                    >
-                      <div className={`absolute inset-0 bg-gradient-to-br ${styles.accent} opacity-100`} />
-                      <div className="relative z-10">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${styles.pill}`}>
-                                {p.edge_quality_tier || "PASS"}
-                              </span>
-
-                              {p.bet_recommendation ? (
-                                <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">
-                                  Recommended
-                                </span>
-                              ) : null}
-
-                              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${riskStyles(p.risk_label)}`}>
-                                {p.risk_label || "—"} Risk
-                              </span>
-                            </div>
-
-                            <div className="mt-4 text-xl md:text-2xl font-bold text-white">
-                              {home?.name} vs {away?.name}
-                            </div>
-                            <div className="mt-1 text-sm text-slate-400">{formatDateTime(f.utc_date)}</div>
-                          </div>
-
-                          <div className="min-w-[150px] rounded-2xl border border-white/10 bg-white/5 p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                              Best Value Side
-                            </div>
-                            <div className="mt-2 text-2xl font-bold text-white">
-                              {outcomeLabel(p.best_value_side)}
-                            </div>
-                            <div className="mt-2 text-sm text-slate-400">
-                              Confidence: {p.confidence || "—"}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-5 grid gap-3 md:grid-cols-4">
-                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Edge</div>
-                            <div className="mt-2 text-xl font-bold text-emerald-300">
-                              {signed(p.best_value_edge)}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">EV</div>
-                            <div className="mt-2 text-xl font-bold text-blue-300">
-                              {signed(p.best_value_ev_pct)}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Quality</div>
-                            <div className="mt-2 text-xl font-bold text-white">
-                              {Number(p.edge_quality_score || 0)}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Avg Edge</div>
-                            <div className="mt-2 text-xl font-bold text-white">{averageEdge}%</div>
-                          </div>
-                        </div>
-
-                        <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400 mb-3">
-                              Model
-                            </div>
-                            <div className="space-y-2 text-sm">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Home</span>
-                                <span className="font-semibold text-white">{pct(p.home_win_pct)}%</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Draw</span>
-                                <span className="font-semibold text-white">{pct(p.draw_pct)}%</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Away</span>
-                                <span className="font-semibold text-white">{pct(p.away_win_pct)}%</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400 mb-3">
-                              Market
-                            </div>
-                            <div className="space-y-2 text-sm">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Home</span>
-                                <span className="font-semibold text-white">{pct(p.market_home_pct)}%</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Draw</span>
-                                <span className="font-semibold text-white">{pct(p.market_draw_pct)}%</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Away</span>
-                                <span className="font-semibold text-white">{pct(p.market_away_pct)}%</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
+        <div className="mt-8 grid gap-8 xl:grid-cols-[1.45fr_0.95fr]">
           <div className="space-y-8">
             <div>
               <SectionHeader
-                eyebrow="Schedule"
+                kicker="Value Board"
+                title="Top Value Picks"
+                subtitle="The strongest current spots ranked by edge quality first, then EV."
+              />
+
+              {valuePicks.length === 0 ? (
+                <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-6 text-slate-400">
+                  No picks match this filter right now.
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {valuePicks.map((pick) => {
+                    const fixture = fixtureMap.get(pick.fixture_id);
+                    if (!fixture) return null;
+
+                    const home = getTeam(fixture.home_team_id);
+                    const away = getTeam(fixture.away_team_id);
+                    const tier = tierClasses(pick.edge_quality_tier);
+
+                    return (
+                      <Link
+                        key={pick.fixture_id}
+                        href={`/match/${pick.fixture_id}`}
+                        className={`group relative overflow-hidden rounded-[28px] border border-white/10 bg-[#0c1626] p-5 transition duration-200 ${tier.card}`}
+                      >
+                        <div
+                          className={`absolute inset-0 bg-gradient-to-br ${tier.glow} opacity-100`}
+                        />
+                        <div className="relative z-10">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tier.badge}`}
+                                >
+                                  {pick.edge_quality_tier || "PASS"}
+                                </span>
+
+                                {pick.bet_recommendation ? (
+                                  <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">
+                                    Recommended
+                                  </span>
+                                ) : null}
+
+                                <span
+                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${riskClasses(
+                                    pick.risk_label
+                                  )}`}
+                                >
+                                  {pick.risk_label || "—"} Risk
+                                </span>
+                              </div>
+
+                              <div className="mt-4 text-xl font-bold text-white md:text-2xl">
+                                {home?.name} vs {away?.name}
+                              </div>
+                              <div className="mt-1 text-sm text-slate-400">
+                                {formatDateTime(fixture.utc_date)}
+                              </div>
+                            </div>
+
+                            <div className="min-w-[165px] rounded-[22px] border border-white/10 bg-white/[0.04] p-4">
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">
+                                Best Side
+                              </div>
+                              <div className="mt-2 text-2xl font-bold text-white">
+                                {outcomeLabel(pick.best_value_side)}
+                              </div>
+                              <div className="mt-2 text-xs text-slate-400">
+                                Confidence: {pick.confidence || "—"}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-3 md:grid-cols-4">
+                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                Edge
+                              </div>
+                              <div className="mt-2 text-xl font-bold text-emerald-300">
+                                {signedPct(pick.best_value_edge)}
+                              </div>
+                            </div>
+
+                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                EV
+                              </div>
+                              <div className="mt-2 text-xl font-bold text-blue-300">
+                                {signedPct(pick.best_value_ev_pct)}
+                              </div>
+                            </div>
+
+                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                Quality
+                              </div>
+                              <div className="mt-2 text-xl font-bold text-white">
+                                {Math.round(Number(pick.edge_quality_score || 0))}
+                              </div>
+                            </div>
+
+                            <div className="rounded-[20px] border border-white/10 bg-black/10 p-4">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                Market EV Avg
+                              </div>
+                              <div className="mt-2 text-xl font-bold text-white">
+                                {averageEv}%
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                            <div className="rounded-[22px] border border-white/10 bg-white/[0.04] p-4">
+                              <div className="mb-3 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                                Model Probabilities
+                              </div>
+                              <ThreeWayBar
+                                home={pick.home_win_pct}
+                                draw={pick.draw_pct}
+                                away={pick.away_win_pct}
+                              />
+                            </div>
+
+                            <div className="rounded-[22px] border border-white/10 bg-white/[0.04] p-4">
+                              <div className="mb-3 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                                Market Probabilities
+                              </div>
+                              <ThreeWayBar
+                                home={pick.market_home_pct}
+                                draw={pick.market_draw_pct}
+                                away={pick.market_away_pct}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            {topPick && topFixture ? (
+              <div>
+                <SectionHeader
+                  kicker="Featured"
+                  title="Top Board Position"
+                  subtitle="Highest-ranked current value spot from the active filter."
+                />
+
+                <Link
+                  href={`/match/${topPick.fixture_id}`}
+                  className="block overflow-hidden rounded-[28px] border border-cyan-400/20 bg-[linear-gradient(180deg,#0c1728_0%,#091220_100%)] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.28)] transition hover:border-cyan-400/35"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-300/80">
+                        Featured Pick
+                      </div>
+                      <div className="mt-3 text-xl font-bold text-white">
+                        {topHome?.name} vs {topAway?.name}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-400">
+                        {formatDateTime(topFixture.utc_date)}
+                      </div>
+                    </div>
+
+                    <div
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tierClasses(
+                        topPick.edge_quality_tier
+                      ).badge}`}
+                    >
+                      {topPick.edge_quality_tier || "PASS"}
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-3 gap-3">
+                    <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                        Side
+                      </div>
+                      <div className="mt-2 text-lg font-bold text-white">
+                        {outcomeLabel(topPick.best_value_side)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                        Edge
+                      </div>
+                      <div className="mt-2 text-lg font-bold text-emerald-300">
+                        {signedPct(topPick.best_value_edge)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[20px] border border-white/10 bg-white/[0.04] p-4">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                        EV
+                      </div>
+                      <div className="mt-2 text-lg font-bold text-blue-300">
+                        {signedPct(topPick.best_value_ev_pct)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.04] p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        Probability Split
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        Confidence: {topPick.confidence || "—"}
+                      </div>
+                    </div>
+
+                    <ThreeWayBar
+                      home={topPick.home_win_pct}
+                      draw={topPick.draw_pct}
+                      away={topPick.away_win_pct}
+                    />
+                  </div>
+                </Link>
+              </div>
+            ) : null}
+
+            <div>
+              <SectionHeader
+                kicker="Schedule"
                 title="Upcoming Matches"
-                subtitle="Quick access to the next fixtures in this competition."
+                subtitle="Fast access to the next fixtures in this competition."
               />
 
               <div className="grid gap-3">
-                {upcoming.map((f) => {
-                  const p = predictionMap.get(f.id);
-                  const home = getTeam(f.home_team_id);
-                  const away = getTeam(f.away_team_id);
+                {upcomingFixtures.map((fixture) => {
+                  const prediction = predictionMap.get(fixture.id);
+                  const home = getTeam(fixture.home_team_id);
+                  const away = getTeam(fixture.away_team_id);
 
                   return (
                     <Link
-                      key={f.id}
-                      href={`/match/${f.id}`}
-                      className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4 transition hover:bg-[#101d30]"
+                      key={fixture.id}
+                      href={`/match/${fixture.id}`}
+                      className="rounded-[24px] border border-white/10 bg-[#0c1626] p-4 transition hover:border-white/20 hover:bg-[#101b2d]"
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div>
@@ -522,17 +730,18 @@ export default async function Page({ searchParams }: PageProps) {
                             {home?.name} vs {away?.name}
                           </div>
                           <div className="mt-1 text-sm text-slate-400">
-                            {formatDateTime(f.utc_date)}
+                            {formatDateTime(fixture.utc_date)}
                           </div>
                         </div>
 
-                        {p ? (
+                        {prediction ? (
                           <div className="text-right">
                             <div className="text-sm font-semibold text-white">
-                              {outcomeLabel(p.predicted_result)}
+                              {outcomeLabel(prediction.predicted_result)}
                             </div>
                             <div className="mt-1 text-xs text-slate-400">
-                              {pct(p.home_win_pct)} / {pct(p.draw_pct)} / {pct(p.away_win_pct)}
+                              {pct(prediction.home_win_pct)} / {pct(prediction.draw_pct)} /{" "}
+                              {pct(prediction.away_win_pct)}
                             </div>
                           </div>
                         ) : null}
@@ -545,31 +754,31 @@ export default async function Page({ searchParams }: PageProps) {
 
             <div>
               <SectionHeader
-                eyebrow="Performance"
+                kicker="Tracking"
                 title="Recent Results"
-                subtitle="Latest settled outcomes and hit-rate visibility."
+                subtitle="Quick view of settled outcomes and prediction hit rate."
               />
 
               <div className="grid gap-3">
-                {results.map((f) => {
-                  const p = predictionMap.get(f.id);
-                  const home = getTeam(f.home_team_id);
-                  const away = getTeam(f.away_team_id);
+                {recentResults.map((fixture) => {
+                  const prediction = predictionMap.get(fixture.id);
+                  const home = getTeam(fixture.home_team_id);
+                  const away = getTeam(fixture.away_team_id);
 
-                  const actual =
-                    Number(f.home_score || 0) > Number(f.away_score || 0)
-                      ? "HOME"
-                      : Number(f.home_score || 0) < Number(f.away_score || 0)
-                      ? "AWAY"
-                      : "DRAW";
+                  const actual = resultLabel(
+                    fixture.home_score,
+                    fixture.away_score
+                  );
 
-                  const correct = p ? p.predicted_result === actual : undefined;
+                  const correct = prediction
+                    ? prediction.predicted_result === actual
+                    : undefined;
 
                   return (
                     <Link
-                      key={f.id}
-                      href={`/match/${f.id}`}
-                      className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4 transition hover:bg-[#101d30]"
+                      key={fixture.id}
+                      href={`/match/${fixture.id}`}
+                      className="rounded-[24px] border border-white/10 bg-[#0c1626] p-4 transition hover:border-white/20 hover:bg-[#101b2d]"
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div>
@@ -577,22 +786,22 @@ export default async function Page({ searchParams }: PageProps) {
                             {home?.name} vs {away?.name}
                           </div>
                           <div className="mt-1 text-sm text-slate-400">
-                            {f.home_score ?? "-"} - {f.away_score ?? "-"}
+                            {fixture.home_score ?? "-"} - {fixture.away_score ?? "-"}
                           </div>
                         </div>
 
                         <div className="text-right">
-                          {p ? (
+                          {prediction ? (
                             <>
                               <div
-                                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resultBadge(
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${accuracyClasses(
                                   correct
                                 )}`}
                               >
                                 {correct ? "Correct" : "Wrong"}
                               </div>
                               <div className="mt-2 text-xs text-slate-400">
-                                Predicted: {outcomeLabel(p.predicted_result)}
+                                Predicted: {outcomeLabel(prediction.predicted_result)}
                               </div>
                             </>
                           ) : (
