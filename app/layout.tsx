@@ -1,6 +1,8 @@
+import "./globals.css";
+
 export const metadata = {
   title: "Football Stats Agent",
-  description: "Football statistics app"
+  description: "Football statistics app",
 };
 
 export default function RootLayout({
